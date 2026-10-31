@@ -1,7 +1,13 @@
 from dataclasses import dataclass
-from typing import Literal, Mapping
+from typing import Callable, Literal, Mapping
 
-from vdi2230.domain.models import JsonScalar, JsonValue
+from vdi2230.domain.models import (
+    CalculationResult,
+    JsonScalar,
+    JsonValue,
+    ProjectSnapshot,
+)
+from vdi2230.domain.section import SectionGeometry
 from vdi2230.domain.validation import require_finite
 
 
@@ -36,6 +42,26 @@ class InputFieldSpec:
             raise ValueError(
                 f"Non-choice field {self.key} cannot define choices"
             )
+
+
+CalculationFunction = Callable[[ProjectSnapshot], CalculationResult]
+GeometryFunction = Callable[[Mapping[str, JsonValue]], SectionGeometry | None]
+
+
+@dataclass(frozen=True)
+class CaseFormDefinition:
+    case_id: str
+    title: str
+    fields: tuple[InputFieldSpec, ...]
+    calculate: CalculationFunction
+    geometry: GeometryFunction
+
+    def __post_init__(self) -> None:
+        if not self.case_id:
+            raise ValueError("Calculation case ID must not be empty")
+        field_keys = [field.key for field in self.fields]
+        if len(set(field_keys)) != len(field_keys):
+            raise ValueError(f"Duplicate input field in {self.case_id}")
 
 
 def parse_form_values(

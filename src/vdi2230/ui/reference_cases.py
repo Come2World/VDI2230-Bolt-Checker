@@ -15,8 +15,7 @@ from vdi2230.domain.models import (
     ProjectSnapshot,
 )
 from vdi2230.domain.section import SectionGeometry
-from vdi2230.ui.forms import InputFieldSpec
-from vdi2230.ui.main_window import CaseFormDefinition
+from vdi2230.ui.forms import CaseFormDefinition, InputFieldSpec
 
 
 _CASE_CALCULATORS: tuple[

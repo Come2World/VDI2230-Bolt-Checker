@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
-from typing import Callable, Mapping
+from typing import Mapping
 
 from vdi2230.domain.models import (
     CalculationValue,
@@ -13,15 +12,10 @@ from vdi2230.domain.models import (
     JsonValue,
     ProjectSnapshot,
 )
-from vdi2230.domain.section import SectionGeometry
 from vdi2230.infrastructure.project_file import load_project, save_project
 from vdi2230.infrastructure.report import render_text_report
-from vdi2230.ui.forms import InputFieldSpec, parse_form_values
+from vdi2230.ui.forms import CaseFormDefinition, InputFieldSpec, parse_form_values
 from vdi2230.ui.section_view import SectionView
-
-
-CalculationFunction = Callable[[ProjectSnapshot], CalculationResult]
-GeometryFunction = Callable[[Mapping[str, JsonValue]], SectionGeometry | None]
 
 
 def format_result_value(result: CalculationValue) -> str:
@@ -59,22 +53,6 @@ def format_result_details(result: CalculationValue) -> str:
     if result.note:
         lines.append(f"说明：{result.note}")
     return "\n".join(lines)
-
-
-@dataclass(frozen=True)
-class CaseFormDefinition:
-    case_id: str
-    title: str
-    fields: tuple[InputFieldSpec, ...]
-    calculate: CalculationFunction
-    geometry: GeometryFunction
-
-    def __post_init__(self) -> None:
-        if not self.case_id:
-            raise ValueError("Calculation case ID must not be empty")
-        field_keys = [field.key for field in self.fields]
-        if len(set(field_keys)) != len(field_keys):
-            raise ValueError(f"Duplicate input field in {self.case_id}")
 
 
 class MainWindow:
