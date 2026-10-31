@@ -20,6 +20,7 @@ class ResultStatus(str, Enum):
     NEEDS_REVIEW = "需确认"
     OUT_OF_SCOPE = "超出范围"
     ERROR = "计算错误"
+    NOT_APPLICABLE = "不适用"
 
 
 @dataclass(frozen=True)

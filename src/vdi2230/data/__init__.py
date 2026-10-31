@@ -280,6 +280,37 @@ def tightening_factor_presets() -> tuple[dict[str, Any], ...]:
     return tuple(dict(row) for row in _tables()["tightening_factor_alpha_a"]["rows"])
 
 
+def table_status(table_key: str) -> str:
+    return _tables()[table_key]["verification_status"]
+
+
+def source_is_provisional(source: str) -> bool:
+    """Whether a provenance tag refers to a record that still needs verification.
+
+    Tags: ``catalog:<variant_id>``, ``class:<property_class>``,
+    ``material:<material_id>``, ``table:<vdi table key>`` and
+    ``default:<note>`` refer to bundled data; ``user`` / ``user:<note>`` are
+    values the engineer entered and is responsible for.
+    """
+    kind, _, key = source.partition(":")
+    try:
+        if kind == "catalog":
+            status = bolt_variant(key).verification_status
+        elif kind == "class":
+            status = next(row for row in property_classes() if row.property_class == key).verification_status
+        elif kind == "material":
+            status = material(key).verification_status
+        elif kind == "table":
+            status = table_status(key)
+        elif kind == "default":
+            return True
+        else:
+            return False
+    except (KeyError, StopIteration):
+        return True
+    return status in PROVISIONAL_STATUSES
+
+
 def friction_classes() -> tuple[dict[str, Any], ...]:
     return tuple(dict(row) for row in _tables()["friction_classes"]["rows"])
 
@@ -312,6 +343,43 @@ def bolt_catalog_values(
         "nut.height": variant.nut_height,
         "nut.bearing_diameter": variant.nut_bearing_diameter,
     }
+
+
+STRENGTH_PATHS = frozenset({"bolt.yield_strength", "bolt.tensile_strength"})
+SHEAR_RATIO_PATH = "bolt.shear_ratio"
+CATALOG_GEOMETRY_PATHS = (
+    "bolt.d",
+    "bolt.pitch",
+    "bolt.d2",
+    "bolt.d3",
+    "bolt.stress_area",
+    "bolt.head_bearing_diameter",
+    "bolt.head_height",
+    "bolt.thread_length",
+    "bolt.shank_diameter",
+    "bolt.youngs_modulus",
+    "joint.hole_diameter",
+    "nut.height",
+    "nut.bearing_diameter",
+)
+MATERIAL_FIELDS_BY_TARGET = {
+    "plates": ("youngs_modulus", "limiting_surface_pressure"),
+    "tapped": ("youngs_modulus", "tensile_strength", "shear_strength"),
+}
+
+
+def catalog_value_sources(variant_id: str, property_class: str) -> dict[str, str]:
+    """Provenance tags for the values ``bolt_catalog_values`` fills in."""
+    sources = {path: f"catalog:{variant_id}" for path in CATALOG_GEOMETRY_PATHS}
+    sources.update({path: f"class:{property_class}" for path in STRENGTH_PATHS})
+    sources[SHEAR_RATIO_PATH] = "table:shear_strength_ratio"
+    return sources
+
+
+def material_value_sources(material_id: str, prefix: str) -> dict[str, str]:
+    """Provenance tags for material values copied into ``prefix`` (``tapped`` or ``plates[i]``)."""
+    target = "plates" if prefix.startswith("plates[") else prefix
+    return {f"{prefix}.{name}": f"material:{material_id}" for name in MATERIAL_FIELDS_BY_TARGET[target]}
 
 
 def material_values(material_id: str) -> dict[str, float]:
