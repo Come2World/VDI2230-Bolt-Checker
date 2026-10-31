@@ -6,6 +6,8 @@ from pathlib import Path
 
 CATALOG_PATH = (
     Path(__file__).resolve().parents[1]
+    / "src"
+    / "vdi2230"
     / "data"
     / "bolt_catalog"
     / "catalog.json"
@@ -69,6 +71,11 @@ class BoltCatalogTests(unittest.TestCase):
                 self.assertIsNone(row["thread_length_b2_mm"])
                 self.assertGreater(row["unthreaded_shank_length_h_mm"], 0)
 
+    def test_provisional_values_are_usable_but_force_review(self):
+        policy = self.catalog["selection_policy"]
+        self.assertTrue(policy["provisional_values_are_calculation_eligible"])
+        self.assertTrue(policy["provisional_values_force_review_status"])
+
     def test_property_data_and_length_candidates_are_not_authoritative(self):
         classes = self.catalog["property_class_records"]
         self.assertEqual(
@@ -76,7 +83,8 @@ class BoltCatalogTests(unittest.TestCase):
             {"8.8", "10.9", "12.9"},
         )
         for row in classes:
-            self.assertFalse(row["calculation_eligible"])
+            self.assertTrue(row["calculation_eligible"])
+            self.assertTrue(row["requires_review_warning"])
             self.assertEqual(
                 row["verification_status"],
                 "secondary_reference_only",
@@ -119,6 +127,8 @@ class BoltCatalogTests(unittest.TestCase):
         }
         for variant in self.catalog["bolt_geometries"]:
             self.assertTrue(set(variant["source_ids"]) <= source_ids)
+        for joint in self.catalog["joint_dimension_records"]:
+            self.assertTrue(set(joint["source_ids"]) <= source_ids)
 
         for row in self.catalog["thread_sizes"]:
             d = row["nominal_diameter_mm"]
@@ -137,6 +147,36 @@ class BoltCatalogTests(unittest.TestCase):
                     abs_tol=0.000001,
                 )
             )
+
+    def test_joint_dimension_records_cover_every_size_consistently(self):
+        sizes = {
+            row["size_id"]: row["nominal_diameter_mm"]
+            for row in self.catalog["thread_sizes"]
+        }
+        joints = self.catalog["joint_dimension_records"]
+        self.assertEqual([row["thread_size_id"] for row in joints], list(sizes))
+        for row in joints:
+            d = row["nominal_diameter_mm"]
+            self.assertEqual(d, sizes[row["thread_size_id"]])
+            self.assertLess(d, row["clearance_hole_fine_mm"])
+            self.assertLess(
+                row["clearance_hole_fine_mm"],
+                row["clearance_hole_medium_mm"],
+            )
+            self.assertLess(
+                row["clearance_hole_medium_mm"],
+                row["clearance_hole_coarse_mm"],
+            )
+            self.assertGreater(
+                row["head_bearing_diameter_dw_min_mm"],
+                row["clearance_hole_coarse_mm"],
+            )
+            self.assertGreater(
+                row["nut_iso4032_bearing_diameter_dw_min_mm"],
+                row["clearance_hole_coarse_mm"],
+            )
+            self.assertGreater(row["nut_iso4032_height_m_max_mm"], 0.75 * d)
+            self.assertEqual(row["verification_status"], "provisional")
 
 
 if __name__ == "__main__":

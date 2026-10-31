@@ -18,6 +18,7 @@ vdi2230-web = "vdi2230.web.server:main"
 
 [tool.setuptools.package-data]
 "vdi2230.web" = ["static/*.html", "static/*.css", "static/*.js"]
+"vdi2230.data" = ["*.json", "bolt_catalog/*.json", "bolt_catalog/*.md", "bolt_catalog/licenses/*.txt"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
