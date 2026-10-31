@@ -29,6 +29,7 @@ const state = {
   values: {},
   prov: {},
   layers: [],
+  defaultTitle: false,
   selected: 0,
   result: null,
   section: null,
@@ -379,6 +380,7 @@ function layerFields(layer, index, pick) {
     const onChange = (value) => {
       layer.values[spec.path] = value;
       delete layer.prov[spec.path];
+      if (spec.path === "name") layer.defaultName = null;
       if (spec.path === "material_id") applyLayerMaterial(layer, index, value);
       updateSource(path);
       pick.textContent = layerSummary(layer, index);
@@ -407,14 +409,15 @@ function applyLayerMaterial(layer, index, id) {
 function uniqueLayerName() {
   const names = new Set(state.layers.map((layer) => layer.values.name));
   let number = state.layers.length + 1;
-  while (names.has(`板 ${number}`)) number += 1;
+  while (["zh", "en"].some((language) => names.has(translateText(`板 ${number}`, language)))) number += 1;
   return `板 ${number}`;
 }
 
 function addLayer() {
   if (state.layers.length >= state.schema.max_layers) return;
   const base = state.layers[state.selected] || state.layers[state.layers.length - 1];
-  const layer = { values: { ...base.values, name: uniqueLayerName() }, prov: { ...base.prov } };
+  const defaultName = uniqueLayerName();
+  const layer = { values: { ...base.values, name: t(defaultName) }, prov: { ...base.prov }, defaultName };
   state.layers.splice(state.selected + 1, 0, layer);
   state.selected += 1;
   renderLayers();
@@ -479,7 +482,7 @@ let showInputTab = () => {};
 /* ---------- calculation ---------- */
 
 function buildInput() {
-  const input = { schema: state.schema.schema, title: $("#project-title").value.trim() || "通用螺栓连接" };
+  const input = { schema: state.schema.schema, title: $("#project-title").value.trim() || t("通用螺栓连接") };
   for (const spec of state.schema.fields) {
     const [section, name] = spec.path.split(".");
     (input[section] ??= {})[name] = state.values[spec.path] ?? null;
@@ -506,11 +509,13 @@ async function calculate() {
   setStatus("计算中…");
   let response;
   let data;
+  const input = buildInput();
+  const names = state.layers.map((layer) => layer.defaultName);
   try {
     response = await fetch("/api/general/calculate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ input: buildInput(), view, language: i18n.language }),
+      body: JSON.stringify({ input, view, language: i18n.language }),
     });
     data = await response.json();
   } catch {
@@ -521,6 +526,17 @@ async function calculate() {
   if (!response.ok) {
     fail(data.error || `计算失败（${response.status}）`, data.field_errors || []);
     return;
+  }
+  for (const shape of data.section.shapes) {
+    const match = /^plate-(\d+)$/.exec(shape.role);
+    const source = match && names[Number(match[1])];
+    if (shape.kind !== "text" || !source) continue;
+    const name = input.plates[Number(match[1])].name;
+    for (const [language, text] of Object.entries(shape.text_by_language)) {
+      if (text === name || text.startsWith(`${name} · `)) {
+        shape.text_by_language[language] = translateText(source, language) + text.slice(name.length);
+      }
+    }
   }
   render(data);
 }
@@ -747,7 +763,7 @@ function highlightSection() {
 
 function exportReport() {
   if (!state.result) return;
-  const title = ($("#project-title").value.trim() || "通用螺栓连接").replace(/[\\/:*?"<>|\s]+/g, "_").slice(0, 60);
+  const title = ($("#project-title").value.trim() || t("通用螺栓连接")).replace(/[\\/:*?"<>|\s]+/g, "_").slice(0, 60);
   const blob = new Blob([state.result.report], { type: "text/plain;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = el("a", { href: url, download: `VDI2230-${title}.txt` });
@@ -759,18 +775,34 @@ function exportReport() {
 
 /* ---------- start-up ---------- */
 
-function loadDefaults(defaults) {
+function loadDefaults(defaults, generatedNames = false) {
   for (const spec of state.schema.fields) {
     const [section, name] = spec.path.split(".");
     state.values[spec.path] = defaults[section]?.[name] ?? null;
   }
-  state.layers = defaults.plates.map((values) => ({ values: { ...values }, prov: {} }));
+  state.layers = defaults.plates.map((values) => ({
+    values: { ...values }, prov: {}, defaultName: generatedNames ? values.name : null,
+  }));
   for (const [path, source] of Object.entries(defaults.provenance || {})) {
     const layer = /^plates\[(\d+)]\.(\w+)$/.exec(path);
     if (layer) state.layers[Number(layer[1])].prov[layer[2]] = source;
     else state.prov[path] = source;
   }
   $("#project-title").value = defaults.title || "";
+  state.defaultTitle = generatedNames;
+  localizeDefaultNames();
+}
+
+function localizeDefaultNames() {
+  const changed = new Set();
+  if (state.defaultTitle) $("#project-title").value = t("通用螺栓连接");
+  state.layers.forEach((layer, index) => {
+    if (layer.defaultName && layer.values.name !== t(layer.defaultName)) {
+      layer.values.name = t(layer.defaultName);
+      changed.add(fieldId(`plates[${index}].name`));
+    }
+  });
+  return changed;
 }
 
 async function init() {
@@ -788,7 +820,7 @@ async function init() {
   }
   for (const spec of state.schema.fields) state.specs.set(spec.path, spec);
   for (const spec of state.schema.layer_fields) state.layerSpecs.set(spec.path, spec);
-  loadDefaults(state.schema.defaults);
+  loadDefaults(state.schema.defaults, true);
 
   showInputTab = setupTabs($(".input-pane [role='tablist']"));
   setupTabs($(".result-pane [role='tablist']"));
@@ -799,7 +831,10 @@ async function init() {
   $("#add-layer").addEventListener("click", addLayer);
   $("#section-add-layer").addEventListener("click", addLayer);
   $("#section-remove-layer").addEventListener("click", () => removeLayer(state.selected));
-  $("#project-title").addEventListener("input", () => scheduleCalculation(400));
+  $("#project-title").addEventListener("input", () => {
+    state.defaultTitle = false;
+    scheduleCalculation(400);
+  });
   $("#value-filter").addEventListener("input", filterValues);
   $("#export").addEventListener("click", exportReport);
   $("#language").addEventListener("change", () => {
@@ -815,6 +850,7 @@ async function init() {
     translateStatic();
     const opened = new Map($$("details.group").map((node) => [node.dataset.section, node.open]));
     const entered = new Map($$(".field input:not([type='checkbox'])").map((node) => [node.id, node.value]));
+    const changed = localizeDefaultNames();
     for (const selector of ["#panel-bolt", "#plates-fields", "#panel-load", "#panel-assembly"]) $(selector).replaceChildren();
     $("#bolt-lengths")?.remove();
     renderForm();
@@ -822,7 +858,7 @@ async function init() {
     renderLayers();
     for (const [id, value] of entered) {
       const control = document.getElementById(id);
-      if (control) control.value = value;
+      if (control && !changed.has(id)) control.value = value;
     }
     applyVisibility();
     if (state.section) drawSection(state.section);

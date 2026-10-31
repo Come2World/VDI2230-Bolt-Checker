@@ -444,7 +444,7 @@ TEMPLATES = {
     "已计算 · {time}": "Calculated · {time}",
     "已导出 {name}": "Exported {name}",
     "板层 {index}": "Plate {index}",
-    "板 {index}": "Plate {index}",
+    "板 {index}": "clamped plate {index}",
     "选中：{name}": "Selected: {name}",
     "不通过：{symbols}": "Failed: {symbols}",
     "待核验数据来源 {count} 项，详见报告。": "{count} unverified sources; see the report.",

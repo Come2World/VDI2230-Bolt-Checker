@@ -139,16 +139,21 @@ language. Numerical values, units, provenance and input schema
 `vdi2230.general/3` are unchanged.
 
 Switching retains parameters (including their entered text), plate selection
-and user overrides. Project titles, plate names and user-supplied provenance
-are **not translated**, including names initially supplied by the application.
+and user overrides. Untouched application-generated titles and plate names
+follow the language: **General bolt joint** and **clamped plate 1, 2, …** in
+English, **通用螺栓连接** and **板 1、2、…** in Chinese. Newly added plates use
+the current language. Once edited, names are user text and are **not translated**,
+even if they match a default name. Loaded design names and user-supplied
+provenance are also preserved.
 Invalid inputs remain invalid: export stays disabled, and the last valid
 drawing remains visibly marked as stale in the selected language.
 
 The web selection is reflected in the URL: open
 <http://127.0.0.1:8765/?lang=en> for English or `?lang=zh` for Chinese.
 Refreshing retains the URL language, **not the design parameters**.
-Tk defaults to Chinese on a new launch; its selector applies to the current
-window. Operating-system file-dialog controls follow the OS language.
+Both the web UI (without `lang`) and a new Tk window **default to English**.
+The Tk selector applies to the current window.
+Operating-system file-dialog controls follow the OS language.
 **B1–B5 reference mode is unchanged and does not have this language switch.**
 
 For programmatic general calculations, send `"language": "en"` or `"zh"` next

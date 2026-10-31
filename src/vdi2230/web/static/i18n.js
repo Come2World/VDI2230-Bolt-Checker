@@ -5,17 +5,21 @@ const hasChinese = (text) => /[\u4e00-\u9fff]/.test(text);
 const escapePattern = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 function t(text) {
-  if (i18n.language === "zh" || !text) return text;
+  return translateText(text, i18n.language);
+}
+
+function translateText(text, language) {
+  if (language === "zh" || !text) return text;
   if (Object.hasOwn(i18n.messages, text)) return i18n.messages[text];
   for (const [pattern, target] of i18n.patterns) {
     const match = pattern.exec(text);
-    if (match) return target.replace(/\{(\w+)\}/g, (_, key) => t(match.groups[key]));
+    if (match) return target.replace(/\{(\w+)\}/g, (_, key) => translateText(match.groups[key], language));
   }
   for (const separator of [" ← ", " · "]) {
-    if (text.includes(separator)) return text.split(separator).map(t).join(separator);
+    if (text.includes(separator)) return text.split(separator).map((part) => translateText(part, language)).join(separator);
   }
   for (const prefix of ["VDI 2230 Blatt 1:2015, ", "default:", "- "]) {
-    if (text.startsWith(prefix)) return prefix + t(text.slice(prefix.length));
+    if (text.startsWith(prefix)) return prefix + translateText(text.slice(prefix.length), language);
   }
   if (hasChinese(text)) throw new Error(`Missing English translation: ${text}`);
   return text;
@@ -52,7 +56,7 @@ function initializeTranslations(data) {
       if (value && hasChinese(value)) i18n.staticAttributes.push([node, key, value]);
     }
   }
-  const language = new URL(location.href).searchParams.get("lang") || "zh";
+  const language = new URL(location.href).searchParams.get("lang") || "en";
   if (!["zh", "en"].includes(language)) throw new Error("Unsupported language; use zh or en.");
   i18n.language = language;
   translateStatic();

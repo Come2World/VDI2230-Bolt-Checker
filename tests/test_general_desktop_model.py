@@ -107,6 +107,48 @@ class GeneralFormModelTests(unittest.TestCase):
         self.assertIsNone(model.source_for("plates[9].thickness"))
         self.assertEqual(model.label_for("plates[1].thickness"), "板层 2 · 厚度 h")
 
+    def test_generated_names_follow_language_without_changing_calculations(self):
+        model = self.model
+        original = model.to_input_json()
+        before = model.calculate().result
+        self.assertEqual(model.set_language("en"), {"plates[0].name", "plates[1].name"})
+        self.assertEqual(model.title, "General bolt joint")
+        self.assertEqual([layer.values["name"] for layer in model.layers], ["clamped plate 1", "clamped plate 2"])
+        english = model.calculate("en")
+        self.assertNotRegex(english.report, r"[\u4e00-\u9fff]")
+        self.assertEqual(english.result.result.values, before.result.values)
+        self.assertEqual(english.result.checks, before.checks)
+        model.set_language("zh")
+        self.assertEqual(model.to_input_json(), original)
+
+    def test_edited_and_loaded_names_are_not_translated(self):
+        model = self.model
+        model.set_title("通用螺栓连接")
+        model.set_layer_value(0, "name", "板 1")
+        model.set_layer_value(1, "name", "用户板层")
+        original = model.to_input_json()
+        model.set_language("en")
+        self.assertEqual(model.to_input_json(), original)
+        model.reset(original)
+        model.set_language("zh")
+        model.set_language("en")
+        self.assertEqual(model.to_input_json(), original)
+        model.set_title(" ")
+        self.assertEqual(model.to_input_json()["title"], "General bolt joint")
+
+    def test_generated_layer_names_stay_with_layers_and_avoid_bilingual_collisions(self):
+        model = self.model
+        model.set_language("en")
+        model.set_layer_value(0, "name", "板 3")
+        self.assertTrue(model.add_layer())
+        self.assertEqual(model.layer_name(1), "clamped plate 4")
+        model.move_layer(1, 1)
+        model.set_language("zh")
+        self.assertEqual([model.layer_name(i) for i in range(3)], ["板 3", "板 2", "板 4"])
+        model.remove_layer(1)
+        model.set_language("en")
+        self.assertEqual([model.layer_name(i) for i in range(2)], ["板 3", "clamped plate 4"])
+
     def test_new_variant_overwrites_catalog_values(self):
         model = self.model
         model.set_value("bolt.head_bearing_diameter", 17.0)

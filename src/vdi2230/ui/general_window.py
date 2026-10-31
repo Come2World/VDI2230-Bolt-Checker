@@ -6,6 +6,7 @@ All state lives in :class:`GeneralFormModel`; this module only binds widgets.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 import re
@@ -91,12 +92,14 @@ class ScrollFrame(ttk.Frame):
 
 
 class GeneralWindow:
-    def __init__(self, root: tk.Tk | tk.Toplevel, model: GeneralFormModel | None = None, *, language: Language = "zh") -> None:
+    def __init__(self, root: tk.Tk | tk.Toplevel, model: GeneralFormModel | None = None, *, language: Language = "en") -> None:
         self.root = root
         self.language = language_code(language)
         self.model = model or GeneralFormModel()
+        self.model.set_language(self.language)
         self.outcome: Outcome | None = None
         self._last_good = None
+        self._last_good_names: tuple[str | None, ...] = ()
         self._syncing = False
         self._calc_job: str | None = None
         self._draw_job: str | None = None
@@ -149,6 +152,7 @@ class GeneralWindow:
             if job is not None:
                 self.root.after_cancel(job)
         self._calc_job = self._draw_job = None
+        changed = self.model.set_language(language)
         self.language = language
         self.root.title(self.t("VDI 2230 螺栓连接计算 · 通用"))
         self.topbar.destroy()
@@ -167,7 +171,7 @@ class GeneralWindow:
         self._syncing = True
         try:
             for path, value in entered.items():
-                if path in self._vars:
+                if path in self._vars and path not in changed:
                     self._vars[path].set(value)
         finally:
             self._syncing = False
@@ -509,7 +513,7 @@ class GeneralWindow:
         marker.configure(text=text, foreground=color)
 
     def _on_title(self, *_args: object) -> None:
-        self.model.title = self.title_var.get()
+        self.model.set_title(self.title_var.get())
         self.schedule_calculation(500)
 
     def _on_field(self, path: str) -> None:
@@ -634,6 +638,7 @@ class GeneralWindow:
         self.outcome = outcome
         if outcome.ok:
             self._last_good = outcome.result
+            self._last_good_names = tuple(layer.default_name for layer in self.model.layers)
             self._render_success(outcome)
         else:
             self._render_failure(outcome)
@@ -785,7 +790,12 @@ class GeneralWindow:
         if self._last_good is None:
             return
         width, height = self._view_size()
-        for shape in general_section_shapes(self._last_good.input, self._last_good.metrics, width, height, language=self.language):
+        item = self._last_good.input
+        item = replace(item, plates=tuple(
+            replace(plate, name=self.t(source)) if source else plate
+            for plate, source in zip(item.plates, self._last_good_names, strict=True)
+        ))
+        for shape in general_section_shapes(item, self._last_good.metrics, width, height, language=self.language):
             kind, coordinates, options = canvas_item(shape)
             getattr(self.canvas, f"create_{kind}")(*coordinates, **options)
         self._highlight_plate()
@@ -845,7 +855,7 @@ class GeneralWindow:
         if self.outcome is None or not self.outcome.ok:
             return None
         if path is None:
-            title = _FILENAME_UNSAFE.sub("_", self.model.title.strip() or "通用螺栓连接")[:60]
+            title = _FILENAME_UNSAFE.sub("_", self.model.title.strip() or self.t("通用螺栓连接"))[:60]
             chosen = filedialog.asksaveasfilename(
                 parent=self.root, title=self.t("导出计算报告"), defaultextension=".txt",
                 initialfile=f"VDI2230-{title}.txt", filetypes=[(self.t("文本文件"), "*.txt")],

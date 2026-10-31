@@ -1,3 +1,4 @@
+from copy import deepcopy
 from pathlib import Path
 import re
 from tempfile import TemporaryDirectory
@@ -37,7 +38,7 @@ class GeneralBrowserTests(unittest.TestCase):
         self.page = self.context.new_page()
         self.page_errors: list[str] = []
         self.page.on("pageerror", lambda error: self.page_errors.append(str(error)))
-        self.page.goto(self.base_url)
+        self.page.goto(self.base_url + "/?lang=zh")
         self.export = self.page.get_by_role("button", name="导出 TXT")
         expect(self.export).to_be_enabled()
 
@@ -46,6 +47,47 @@ class GeneralBrowserTests(unittest.TestCase):
 
     def metric(self, term: str):
         return self.page.locator(f"xpath=//dl[@id='key-metrics']//dt[normalize-space()='{term}']/following-sibling::dd[1]")
+
+    def test_default_startup_uses_english_names_and_report(self):
+        page = self.page
+        page.goto(self.base_url)
+        expect(page.locator("#language")).to_have_value("en")
+        expect(page.locator("#project-title")).to_have_value("General bolt joint")
+        page.locator("#tab-plates").click()
+        expect(page.locator("#f-plates-0-name")).to_have_value("clamped plate 1")
+        expect(page.locator("#layers")).to_contain_text("clamped plate 2")
+        expect(page.locator("#export")).to_be_enabled()
+        self.assertNotRegex(page.locator("#report-preview").text_content(), r"[\u4e00-\u9fff]")
+        self.assertNotRegex(page.locator("#section").text_content(), r"[\u4e00-\u9fff]")
+        page.locator("#add-layer").click()
+        expect(page.locator("#f-plates-1-name")).to_have_value("clamped plate 3")
+        page.get_by_role("button", name="Move plate 2 down", exact=True).click()
+        page.locator("#language").select_option("zh")
+        expect(page.locator("#project-title")).to_have_value("通用螺栓连接")
+        expect(page.locator("#f-plates-2-name")).to_have_value("板 3")
+        page.locator("#language").select_option("en")
+        expect(page.locator("#f-plates-2-name")).to_have_value("clamped plate 3")
+        expect(page.locator("#report-preview")).to_contain_text("clamped plate 3")
+
+    def test_explicit_default_text_is_preserved_and_blank_title_uses_localized_fallback(self):
+        page = self.page
+        page.locator("#project-title").fill("通用螺栓连接")
+        page.locator("#tab-plates").click()
+        page.locator("#f-plates-0-name").fill("板 3")
+        page.locator("#language").select_option("en")
+        expect(page.locator("#project-title")).to_have_value("通用螺栓连接")
+        expect(page.locator("#f-plates-0-name")).to_have_value("板 3")
+        page.locator("#add-layer").click()
+        expect(page.locator("#f-plates-1-name")).to_have_value("clamped plate 4")
+        expect(page.locator("#report-preview")).to_contain_text("clamped plate 4")
+        with page.expect_response(CALCULATE) as response:
+            page.locator("#project-title").fill("")
+        self.assertEqual(response.value.json()["input"]["title"], "General bolt joint")
+        expect(page.locator("#export")).to_be_enabled()
+        with page.expect_download() as download:
+            page.locator("#export").click()
+        self.assertEqual(download.value.suggested_filename, "VDI2230-General_bolt_joint.txt")
+        self.assertIn("板 3", Path(download.value.path()).read_text(encoding="utf-8"))
 
     def test_language_switch_preserves_inputs_results_and_localizes_download(self):
         page = self.page
@@ -76,7 +118,10 @@ class GeneralBrowserTests(unittest.TestCase):
         with page.expect_response(CALCULATE) as response:
             page.locator("#language").select_option("zh")
         chinese = response.value.json()
-        self.assertEqual(chinese["input"], english["input"])
+        expected_chinese = deepcopy(english["input"])
+        self.assertEqual(expected_chinese["plates"][1]["name"], "clamped plate 2")
+        expected_chinese["plates"][1]["name"] = "板 2"
+        self.assertEqual(chinese["input"], expected_chinese)
         self.assertEqual([(v["symbol"], v["value"]) for v in chinese["values"]],
                          [(v["symbol"], v["value"]) for v in english["values"]])
         expect(page.locator("#report-preview")).to_contain_text("计算报告")
@@ -96,6 +141,10 @@ class GeneralBrowserTests(unittest.TestCase):
         expect(page.locator("#export")).to_be_disabled()
         expect(page.locator("#section-stale")).to_be_visible()
         expect(page.locator("#section [data-role='label-head']").filter(has_text="Bolt head")).to_have_count(1)
+        expect(page.locator("#section text[data-role='plate-0']").filter(has_text="clamped plate 1")).to_have_count(1)
+        expect(page.locator("#project-title")).to_have_value("General bolt joint")
+        page.locator("#tab-plates").click()
+        expect(page.locator("#f-plates-0-name")).to_have_value("clamped plate 1")
         page.reload()
         expect(page.get_by_role("button", name="Export TXT")).to_be_enabled()
         expect(page.locator("html")).to_have_attribute("lang", "en")

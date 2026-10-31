@@ -1,3 +1,4 @@
+from copy import deepcopy
 import tempfile
 import tkinter as tk
 from tkinter import ttk
@@ -42,6 +43,11 @@ class WindowPlacementTests(unittest.TestCase):
         try:
             geometry.assert_called_once_with("1440x860+36+40")
             self.assertEqual(root.minsize(), WINDOW_MIN_SIZE)
+            self.assertEqual(window.language, "en")
+            self.assertEqual(window.title_var.get(), "General bolt joint")
+            self.assertEqual(window._vars["plates[0].name"].get(), "clamped plate 1")
+            self.assertEqual(window.model.layer_name(1), "clamped plate 2")
+            self.assertNotRegex(window.report(), r"[\u4e00-\u9fff]")
         finally:
             window.close()
 
@@ -53,7 +59,7 @@ class GeneralWindowTests(unittest.TestCase):
         except tk.TclError as exc:
             self.skipTest(f"Tk 不可用：{exc}")
         self.root.withdraw()
-        self.window = GeneralWindow(self.root)
+        self.window = GeneralWindow(self.root, language="zh")
         self.window.calculate_now()
 
     def tearDown(self):
@@ -92,7 +98,9 @@ class GeneralWindowTests(unittest.TestCase):
         self.root.update()
         self.assertEqual(window.language, "en")
         self.assertEqual(window._vars["bolt.bearing_friction"].get(), "0.10")
-        self.assertEqual(window.model.to_input_json(), inputs)
+        english_inputs = deepcopy(inputs)
+        english_inputs["plates"][0]["name"] = "clamped plate 1"
+        self.assertEqual(window.model.to_input_json(), english_inputs)
         self.assertEqual(window.model.selected, 1)
         self.assertEqual(window.input_tabs.index("current"), window._tab_index["plates"])
         self.assertEqual(window.check_tree.set("SF", "status"), "Pass")
@@ -121,6 +129,33 @@ class GeneralWindowTests(unittest.TestCase):
         labels = [window.canvas.itemcget(item, "text") for item in window.canvas.find_withtag("label-head")
                   if window.canvas.type(item) == "text"]
         self.assertTrue(any("Bolt head" in label for label in labels))
+        self.assertEqual(window.title_var.get(), "General bolt joint")
+        self.assertEqual(window._vars["plates[0].name"].get(), "clamped plate 1")
+        plate_labels = [window.canvas.itemcget(item, "text") for item in window.canvas.find_withtag("plate-0")
+                        if window.canvas.type(item) == "text"]
+        self.assertTrue(any("clamped plate 1" in label for label in plate_labels))
+
+    def test_generated_names_switch_but_explicit_user_names_do_not(self):
+        window = self.window
+        window.set_language("en")
+        window.add_layer()
+        window.calculate_now()
+        self.assertEqual(window._vars["plates[1].name"].get(), "clamped plate 3")
+        window.move_layer(1)
+        window.set_language("zh")
+        self.assertEqual(window.title_var.get(), "通用螺栓连接")
+        self.assertEqual(window._vars["plates[2].name"].get(), "板 3")
+        window.title_var.set("通用螺栓连接")
+        window._vars["plates[2].name"].set("板 3")
+        window.set_language("en")
+        self.assertEqual(window.title_var.get(), "通用螺栓连接")
+        self.assertEqual(window._vars["plates[2].name"].get(), "板 3")
+        window.title_var.set("")
+        window.calculate_now()
+        self.assertEqual(window.outcome.result.input.title, "General bolt joint")
+        with mock.patch("vdi2230.ui.general_window.filedialog.asksaveasfilename", return_value="") as dialog:
+            window.export_report()
+        self.assertEqual(dialog.call_args.kwargs["initialfile"], "VDI2230-General_bolt_joint.txt")
 
     def test_values_filter_narrows_the_list(self):
         window = self.window

@@ -23,7 +23,7 @@ from vdi2230.domain.general_inputs import (
 )
 from vdi2230.infrastructure.general_report import render_general_report
 from vdi2230.infrastructure.general_section import TEXT_FILL, Shape, section_target
-from vdi2230.i18n import Language, translate
+from vdi2230.i18n import Language, language_code, translate
 
 
 DEFAULT_TITLE = "通用螺栓连接"
@@ -162,6 +162,7 @@ def canvas_item(shape: Shape) -> tuple[str, tuple[float, ...], dict[str, Any]]:
 class Layer:
     values: dict[str, Any]
     prov: dict[str, str] = field(default_factory=dict)
+    default_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -184,6 +185,7 @@ class Outcome:
 
 class GeneralFormModel:
     def __init__(self) -> None:
+        self.language: Language = "zh"
         schema = field_schema_json()
         self.schema_id: str = schema["schema"]
         self.max_layers: int = schema["max_layers"]
@@ -195,11 +197,15 @@ class GeneralFormModel:
         self.materials = {record["material_id"]: record for record in self.catalog["materials"]}
         self.provisional: set[str] = set()
         self.reset(schema["defaults"])
+        self.default_title = True
+        for layer in self.layers:
+            layer.default_name = layer.values["name"]
 
     # ----- state -----
 
     def reset(self, defaults: dict[str, Any]) -> None:
         self.title = defaults.get("title") or DEFAULT_TITLE
+        self.default_title = False
         self.values: dict[str, Any] = {}
         for spec in self.fields:
             section, name = spec["path"].split(".")
@@ -213,6 +219,32 @@ class GeneralFormModel:
             elif not match:
                 self.prov[path] = source
         self.selected = 0
+
+    def set_title(self, title: str) -> None:
+        self.title = title
+        self.default_title = False
+
+    def set_language(self, language: Language) -> set[str]:
+        """Localize only untouched generated names; return changed field paths."""
+        language = language_code(language)
+        changed: set[str] = set()
+        if self.default_title and self.title != translate(DEFAULT_TITLE, self.language):
+            self.default_title = False
+        if self.default_title:
+            self.title = translate(DEFAULT_TITLE, language)
+        for index, layer in enumerate(self.layers):
+            source = layer.default_name
+            if source is None:
+                continue
+            if layer.values.get("name") != translate(source, self.language):
+                layer.default_name = None
+                continue
+            name = translate(source, language)
+            if name != layer.values["name"]:
+                layer.values["name"] = name
+                changed.add(f"plates[{index}].name")
+        self.language = language
+        return changed
 
     def source_for(self, path: str) -> str | None:
         match = _LAYER_PATH.match(path)
@@ -309,6 +341,8 @@ class GeneralFormModel:
         layer = self.layers[index]
         layer.values[name] = value
         layer.prov.pop(name, None)
+        if name == "name":
+            layer.default_name = None
         if name == "material_id":
             self._apply_material(value, "plates", layer)
 
@@ -322,7 +356,7 @@ class GeneralFormModel:
     def _unique_layer_name(self) -> str:
         names = {layer.values.get("name") for layer in self.layers}
         number = len(self.layers) + 1
-        while f"板 {number}" in names:
+        while any(translate(f"板 {number}", language) in names for language in ("zh", "en")):
             number += 1
         return f"板 {number}"
 
@@ -331,7 +365,10 @@ class GeneralFormModel:
         if len(self.layers) >= self.max_layers:
             return False
         base = self.layers[self.selected]
-        self.layers.insert(self.selected + 1, Layer({**base.values, "name": self._unique_layer_name()}, dict(base.prov)))
+        source = self._unique_layer_name()
+        self.layers.insert(self.selected + 1, Layer(
+            {**base.values, "name": translate(source, self.language)}, dict(base.prov), source,
+        ))
         self.selected += 1
         return True
 
@@ -359,7 +396,7 @@ class GeneralFormModel:
     # ----- calculation -----
 
     def to_input_json(self) -> dict[str, Any]:
-        item: dict[str, Any] = {"schema": self.schema_id, "title": self.title.strip() or DEFAULT_TITLE}
+        item: dict[str, Any] = {"schema": self.schema_id, "title": self.title.strip() or translate(DEFAULT_TITLE, self.language)}
         for spec in self.fields:
             section, name = spec["path"].split(".")
             item.setdefault(section, {})[name] = self.values.get(spec["path"])
