@@ -250,6 +250,7 @@ function applyVisibility() {
 }
 
 function invalidateResult() {
+  ++state.seq;
   $("#export").disabled = true;
 }
 

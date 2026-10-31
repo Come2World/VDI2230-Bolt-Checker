@@ -1,7 +1,7 @@
 """Bundled, versioned engineering data (bolt catalog, Table A9 materials, VDI tables).
 
-All records are currently provisional transcriptions. Values may be used in
-calculations, but every result that relies on them must be flagged for review.
+Bundled records are accepted as the project's calculation baseline. Source
+and audit notes remain available; model assumptions still require review.
 """
 from __future__ import annotations
 
@@ -156,7 +156,8 @@ def bolt_variants() -> tuple[BoltVariant, ...]:
             nut_height=float(joint["nut_iso4032_height_m_max_mm"]),
             nut_bearing_diameter=float(joint["nut_iso4032_bearing_diameter_dw_min_mm"]),
             verification_status=(
-                "provisional_conflict" if "provisional_conflict" in statuses else "provisional"
+                "accepted_baseline" if statuses == {"accepted_baseline"}
+                else "provisional_conflict" if "provisional_conflict" in statuses else "provisional"
             ),
         ))
     return tuple(variants)
@@ -398,7 +399,7 @@ def catalog_summary() -> dict[str, Any]:
     """JSON-serializable lookup data for user interfaces."""
     return {
         "catalog_version": _bolt_catalog()["catalog_version"],
-        "status": "provisional",
+        "status": _bolt_catalog()["catalog_status"],
         "bolts": [
             {
                 "variant_id": variant.variant_id,

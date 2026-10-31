@@ -14,7 +14,6 @@ from vdi2230.calculations.b2 import calculate_b2
 from vdi2230.calculations.b3 import calculate_b3
 from vdi2230.calculations.general import (
     GeneralCalculationResult,
-    REVIEW_LABEL,
     calculate_general,
     iso965_tolerances,
 )
@@ -189,15 +188,24 @@ class GeneralEngineBehaviourTests(unittest.TestCase):
         for symbol in ("FMzul", "MG", "SF", "SD", "Sp,K", "Sp,M"):
             self.assertEqual(result.value(symbol), baseline.value(symbol), symbol)
 
-    def test_default_input_uses_catalog_data_and_needs_review(self) -> None:
+    def test_default_input_uses_accepted_catalog_data_without_forced_review(self) -> None:
         result = run(default_input_json())
-        self.assertEqual(result.verdict, ResultStatus.NEEDS_REVIEW)
-        self.assertEqual(result.verdict_label, REVIEW_LABEL)
-        self.assertTrue(any("catalog:ISO4014-M12x1.75" in source for source in result.provisional_sources))
-        self.assertTrue(any(source.startswith("load_introduction.n") for source in result.provisional_sources))
-        self.assertIn("数据待核验", result.verdict_label)
-        self.assertTrue(result.warnings[0].startswith("使用了未经核验"))
+        self.assertEqual(result.verdict, ResultStatus.PASS)
+        self.assertEqual(result.verdict_label, "通过")
+        self.assertEqual(result.provisional_sources, ())
+        self.assertEqual(result.warnings, ())
+        self.assertEqual(result.input.provenance["bolt.d"], "catalog:ISO4014-M12x1.75")
         self.assertNotIn(ResultStatus.FAIL, {check.status for check in result.checks})
+
+    def test_accepting_database_keeps_estimates_and_model_limitations_under_review(self):
+        payload = default_input_json()
+        payload["head_washer"]["enabled"] = True
+        result = run(payload)
+        self.assertEqual(result.verdict, ResultStatus.NEEDS_REVIEW)
+        self.assertEqual(len(result.provisional_sources), 4)
+        self.assertTrue(all(" ← default:" in source for source in result.provisional_sources))
+        self.assertTrue(any("head_washer.model" in source for source in result.provisional_sources))
+        self.assertTrue(any("局部屈服" in warning for warning in result.warnings))
 
     def test_user_values_with_manual_tables_can_pass(self) -> None:
         result = run(b2_payload())

@@ -149,7 +149,7 @@ def render_general_report(
     lines += ["", t("四、待核验数据来源"), THIN_RULE]
     lines.extend(f"- {source_label(source, language)}" for source in result.provisional_sources)
     if not result.provisional_sources:
-        lines.append("- " + t("无（全部为用户输入或已核验数据）"))
+        lines.append("- " + t("无（使用用户输入或项目采信数据）"))
 
     lines += ["", t("五、警告与假设"), THIN_RULE]
     lines.extend(f"- {t(warning)}" for warning in result.warnings)

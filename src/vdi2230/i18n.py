@@ -406,7 +406,7 @@ MESSAGES = {
     "依据": "Reference",
     "说明": "Note",
     "来源": "Source",
-    "无（全部为用户输入或已核验数据）": "None (all data are user-entered or verified)",
+    "无（使用用户输入或项目采信数据）": "None (user inputs or project-accepted data)",
     "工程辅助计算报告，不替代正式标准、专业工程判断或设计审查。": "Engineering calculation aid only; not a substitute for the official standard, professional engineering judgment or design review.",
     "适用范围：同心单螺栓，轴向载荷 + 横向载荷/扭矩；不含偏心、弯曲、温度影响和螺栓组分配。": "Scope: concentric single bolts under axial and transverse load/torque. Eccentricity, bending, thermal effects and bolt-group load distribution are excluded.",
     "R10 工作面压取 FVmax = FMzul − FZ；DSV 采用 w = 1，两侧锥体起始直径分别取螺栓头与螺母 dW。": "R10 working bearing pressure uses FVmax = FMzul − FZ. DSV uses w = 1 with head/nut dW as the respective cone starting diameters.",
@@ -483,7 +483,9 @@ def language_code(value: object) -> Language:
 @lru_cache(maxsize=1)
 def _patterns() -> tuple[tuple[re.Pattern[str], str], ...]:
     records = []
-    for source, target in TEMPLATES.items():
+    # A short template's placeholder must not absorb a more specific message's suffix.
+    ordered = sorted(TEMPLATES.items(), key=lambda pair: len(re.sub(r"\{\w+\}", "", pair[0])), reverse=True)
+    for source, target in ordered:
         parts = []
         for literal, name, _, _ in Formatter().parse(source):
             parts.append(re.escape(literal))

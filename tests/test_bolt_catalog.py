@@ -36,7 +36,7 @@ class BoltCatalogTests(unittest.TestCase):
             self.assertGreater(row["external_thread_minor_diameter_d3_mm"], 0)
             self.assertGreater(row["tensile_stress_area_as_mm2"], 0)
             self.assertIsNone(row["area_a0_mm2"])
-            self.assertEqual(row["verification_status"], "provisional")
+            self.assertEqual(row["verification_status"], "accepted_baseline")
 
     def test_bolt_variants_have_uniform_shape_and_valid_thread_fields(self):
         variants = self.catalog["bolt_geometries"]
@@ -56,10 +56,7 @@ class BoltCatalogTests(unittest.TestCase):
             self.assertIn(row["standard"], {"ISO 4014", "ISO 4017"})
             self.assertGreater(row["head_height_k_mm"], 0)
             self.assertGreater(row["width_across_flats_s_mm"], 0)
-            self.assertIn(row["verification_status"], {
-                "provisional",
-                "provisional_conflict",
-            })
+            self.assertEqual(row["verification_status"], "accepted_baseline")
             if row["standard"] == "ISO 4014":
                 self.assertEqual(row["threading"], "partial")
                 self.assertIsNone(row["unthreaded_shank_length_h_mm"])
@@ -71,12 +68,14 @@ class BoltCatalogTests(unittest.TestCase):
                 self.assertIsNone(row["thread_length_b2_mm"])
                 self.assertGreater(row["unthreaded_shank_length_h_mm"], 0)
 
-    def test_provisional_values_are_usable_but_force_review(self):
+    def test_bundled_values_are_accepted_without_forcing_review(self):
         policy = self.catalog["selection_policy"]
-        self.assertTrue(policy["provisional_values_are_calculation_eligible"])
-        self.assertTrue(policy["provisional_values_force_review_status"])
+        self.assertTrue(policy["bundled_values_are_calculation_eligible"])
+        self.assertFalse(policy["bundled_values_force_review_status"])
+        self.assertEqual(self.catalog["catalog_status"], "accepted_baseline")
+        self.assertNotIn("provisional", json.dumps(self.catalog))
 
-    def test_property_data_and_length_candidates_are_not_authoritative(self):
+    def test_property_data_is_accepted_and_lengths_remain_generic_suggestions(self):
         classes = self.catalog["property_class_records"]
         self.assertEqual(
             {row["property_class"] for row in classes},
@@ -84,10 +83,10 @@ class BoltCatalogTests(unittest.TestCase):
         )
         for row in classes:
             self.assertTrue(row["calculation_eligible"])
-            self.assertTrue(row["requires_review_warning"])
+            self.assertFalse(row["requires_review_warning"])
             self.assertEqual(
                 row["verification_status"],
-                "secondary_reference_only",
+                "accepted_baseline",
             )
             self.assertIsInstance(row["diameter_min_inclusive"], bool)
             self.assertIsInstance(row["diameter_max_inclusive"], bool)
@@ -176,7 +175,7 @@ class BoltCatalogTests(unittest.TestCase):
                 row["clearance_hole_coarse_mm"],
             )
             self.assertGreater(row["nut_iso4032_height_m_max_mm"], 0.75 * d)
-            self.assertEqual(row["verification_status"], "provisional")
+            self.assertEqual(row["verification_status"], "accepted_baseline")
 
 
 if __name__ == "__main__":

@@ -45,7 +45,7 @@ class GeneralApiFunctionTests(unittest.TestCase):
                 self.assertTrue(payload[key])
         self.assertEqual(payload["friction_classes"][0]["class"], "A")
 
-    def test_catalog_values_fill_geometry_and_flag_provisional_sources(self) -> None:
+    def test_catalog_values_fill_geometry_with_accepted_sources(self) -> None:
         status, payload = catalog_values_payload(VALUES_QUERY)
         self.assertEqual(status, 200)
         values = payload["values"]
@@ -53,8 +53,8 @@ class GeneralApiFunctionTests(unittest.TestCase):
         self.assertEqual(values["bolt.pitch"], 1.75)
         self.assertEqual(values["nut.width_across_flats"], 18.0)
         self.assertEqual(values["bolt.thread_length"], 30.0)
-        self.assertIn("bolt.d", payload["provisional"])
-        self.assertTrue(set(payload["provisional"]) <= set(payload["sources"]))
+        self.assertEqual(payload["provisional"], [])
+        self.assertEqual(payload["sources"]["bolt.d"], "catalog:ISO4014-M12x1.75")
 
     def test_catalog_values_reject_bad_queries(self) -> None:
         for query in (
@@ -77,16 +77,16 @@ class GeneralApiFunctionTests(unittest.TestCase):
         status, payload = calculate_payload({"input": default_input_json(), "view": {"width": 600, "height": 480}})
         self.assertEqual(status, 200)
         json.dumps(payload, allow_nan=False)
-        self.assertEqual(payload["verdict"], "需确认")
-        self.assertEqual(payload["verdict_label"], "需确认 · 数据待核验")
+        self.assertEqual(payload["verdict"], "通过")
+        self.assertEqual(payload["verdict_label"], "通过")
         symbols = {check["symbol"] for check in payload["checks"]}
         self.assertTrue({"SF", "SD", "FKR"} <= symbols)
         self.assertEqual((payload["section"]["width"], payload["section"]["height"]), (600, 480))
         roles = {shape["role"] for shape in payload["section"]["shapes"]}
         self.assertTrue({"plate-0", "plate-1", "bolt-head", "nut", "dim-lK"} <= roles)
-        self.assertIn("数据待核验", payload["report"])
+        self.assertIn("总体判定：通过", payload["report"])
         self.assertIn(payload["calculated_at"], payload["report"])
-        self.assertTrue(payload["provisional_sources"])
+        self.assertEqual(payload["provisional_sources"], [])
 
     def test_reference_payloads_calculate_through_the_api(self) -> None:
         for name, factory in (("B1", b1_payload), ("B2", b2_payload), ("B3", b3_payload)):
@@ -94,6 +94,31 @@ class GeneralApiFunctionTests(unittest.TestCase):
                 status, payload = calculate_payload({"input": factory()})
                 self.assertEqual(status, 200, payload.get("error"))
                 json.dumps(payload, allow_nan=False)
+
+    def test_geometry_and_load_validation_remains_structured_in_both_languages(self):
+        for joint in ("DSV", "ESV"):
+            for language in ("zh", "en"):
+                for section, name, invalid in (
+                    ("bolt", "length", 10), ("joint", "hole_diameter", 5),
+                    ("joint", "outer_diameter", 10), ("bolt", "bearing_friction", -1),
+                    ("load", "axial_min", 100000), ("head_washer", "outer_diameter", 10),
+                    ("plates", "thickness", 0), ("plates", "roughness_rz", 160),
+                ):
+                    with self.subTest(joint=joint, language=language, field=f"{section}.{name}"):
+                        item = default_input_json()
+                        item["joint"]["type"] = joint
+                        item["head_washer"]["enabled"] = True
+                        target = item["plates"][0] if section == "plates" else item[section]
+                        target[name] = invalid
+                        status, payload = calculate_payload({"input": item, "language": language})
+                        self.assertEqual(status, 400, payload)
+                        self.assertTrue(payload["error"])
+                        self.assertIn("field_errors", payload)
+                        self.assertNotIn("section", payload)
+                        self.assertNotIn("report", payload)
+                        if language == "en":
+                            messages = payload["error"] + "".join(error["message"] for error in payload["field_errors"])
+                            self.assertNotRegex(messages, r"[\u4e00-\u9fff]")
 
     def test_view_is_optional_and_clamped(self) -> None:
         status, payload = calculate_payload({"input": default_input_json()})
@@ -182,7 +207,7 @@ class GeneralApiHttpTests(unittest.TestCase):
         status, _, body = self.post({"input": default_input_json(), "view": {"width": 500, "height": 400}})
         self.assertEqual(status, 200)
         payload = json.loads(body)
-        self.assertEqual(payload["verdict_label"], "需确认 · 数据待核验")
+        self.assertEqual(payload["verdict_label"], "通过")
         self.assertTrue(payload["section"]["shapes"])
 
     def test_calculate_field_error_round_trip(self) -> None:

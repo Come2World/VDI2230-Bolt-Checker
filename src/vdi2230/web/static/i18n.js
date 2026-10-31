@@ -36,7 +36,9 @@ function tf(message, values) {
 function initializeTranslations(data) {
   i18n.messages = data.messages;
   i18n.templates = data.templates;
-  i18n.patterns = Object.entries(data.templates).map(([source, target]) => {
+  const ordered = Object.entries(data.templates).sort(([left], [right]) =>
+    right.replace(/\{\w+\}/g, "").length - left.replace(/\{\w+\}/g, "").length);
+  i18n.patterns = ordered.map(([source, target]) => {
     const parts = source.split(/(\{\w+\})/g).map((part) =>
       /^\{\w+\}$/.test(part) ? `(?<${part.slice(1, -1)}>.+?)` : escapePattern(part));
     return [new RegExp(`^${parts.join("")}$`, "s"), target];

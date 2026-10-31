@@ -1,15 +1,26 @@
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 import re
+from string import Formatter
 import unittest
 
 from vdi2230.domain.general_inputs import FIELD_SPECS, LAYER_SPECS, default_input_json
-from vdi2230.i18n import MESSAGES, MissingTranslationError, format_text, source_label, translate
+from vdi2230.i18n import MESSAGES, TEMPLATES, MissingTranslationError, format_text, source_label, translate
 from vdi2230.web.general_api import calculate_payload
 from test_general_engine import b1_payload, b2_payload, b3_payload
 
 
 class TranslationTests(unittest.TestCase):
+    def test_specific_validation_template_precedes_its_shorter_prefix(self):
+        message = "须大于夹紧长度 lK = 92.88，留出旋合长度"
+        self.assertEqual(translate(message, "en"), "Must exceed grip length lK = 92.88 to allow thread engagement")
+
+    def test_every_formatted_template_matches_its_own_translation(self):
+        for source in TEMPLATES:
+            values = {name: "1" for _, name, _, _ in Formatter().parse(source) if name}
+            with self.subTest(source=source):
+                self.assertEqual(translate(source.format(**values), "en"), format_text(source, "en", **values))
+
     def test_catalog_and_all_input_metadata_have_english_translations(self):
         for source, english in MESSAGES.items():
             with self.subTest(source=source):

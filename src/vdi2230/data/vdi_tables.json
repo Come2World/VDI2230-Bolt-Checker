@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
-  "catalog_version": "0.1.0",
-  "catalog_status": "provisional",
-  "description": "VDI 2230 Blatt 1:2015 计算用表格转录。来源为本地翻译稿，正式使用前须对照原标准逐项核验。",
+  "catalog_version": "0.2.0",
+  "catalog_status": "accepted_baseline",
+  "description": "VDI 2230 Blatt 1:2015 计算用表格转录。来源为本地翻译稿，随附数据库按项目约定作为正确的计算基线；保留各表的适用范围和边界处理。",
   "sources": [
     {
       "source_id": "vdi2230_2015",
       "title": "VDI 2230 Blatt 1:2015-11",
       "transcription": "REFERENCE/VDI2230 PART 1.md (machine-translated copy)",
-      "verification_status": "provisional"
+      "verification_status": "accepted_baseline"
     }
   ],
   "load_introduction_factor_n": {
@@ -24,7 +24,7 @@
       "SV5": [[0.30, 0.25, 0.22, 0.10], [0.24, 0.21, 0.15, 0.07], [0.19, 0.17, 0.12, 0.06], [0.14, 0.13, 0.10, 0.03]],
       "SV6": [[0.15, 0.14, 0.14, 0.07], [0.13, 0.12, 0.10, 0.06], [0.11, 0.11, 0.09, 0.06], [0.10, 0.10, 0.08, 0.03]]
     },
-    "verification_status": "provisional"
+    "verification_status": "accepted_baseline"
   },
   "embedding_um": {
     "table": "Table 5",
@@ -37,12 +37,12 @@
       {"rz_min_um": 40, "rz_max_um": 160, "load": "axial", "thread": 3.0, "bearing": 4.0, "interface": 3.0},
       {"rz_min_um": 40, "rz_max_um": 160, "load": "shear", "thread": 3.0, "bearing": 6.5, "interface": 3.5}
     ],
-    "verification_status": "provisional"
+    "verification_status": "accepted_baseline"
   },
   "shear_strength_ratio": {
     "table": "Table 7",
     "values": {"4.6": 0.70, "5.6": 0.70, "8.8": 0.65, "10.9": 0.62, "12.9": 0.60, "A2-50": 0.80, "A2-70": 0.72, "A2-80": 0.68, "A4-50": 0.80, "A4-70": 0.72, "A4-80": 0.68},
-    "verification_status": "provisional"
+    "verification_status": "accepted_baseline"
   },
   "friction_classes": {
     "table": "Table A5",
@@ -53,7 +53,7 @@
       {"class": "D", "min": 0.20, "max": 0.35},
       {"class": "E", "min": 0.30, "max": null}
     ],
-    "verification_status": "provisional"
+    "verification_status": "accepted_baseline"
   },
   "tightening_factor_alpha_a": {
     "table": "Table A8",
@@ -63,6 +63,6 @@
       {"method": "扭矩扳手（估算摩擦）", "min": 1.6, "max": 2.0, "note": ""},
       {"method": "冲击扳手", "min": 2.5, "max": 4.0, "note": ""}
     ],
-    "verification_status": "provisional"
+    "verification_status": "accepted_baseline"
   }
 }

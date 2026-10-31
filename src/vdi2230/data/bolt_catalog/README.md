@@ -19,8 +19,8 @@
 1. 用户先选标准、螺纹规格、螺栓长度和强度等级。
 2. 目录字段优先自动填入，字段标识为“目录值”，并保留目录版本与来源。
 3. 目录缺项时才允许手动输入；用户覆盖目录值时保留原始值、新值、覆盖人/时间及来源。
-4. 本目录当前为 `provisional`（`selection_policy.provisional_values_are_calculation_eligible = true`）。未经主标准复核的目录值可以参与计算，但结果必须标记“数据待核验”，整体判定不得为最终“通过”（`provisional_values_force_review_status = true`）。冲突字段需用户核对或输入，不得静默选用某一来源。
-5. 螺栓弹性模量 `ES` 默认取钢制螺栓典型值 205000 MPa，同样作为待核验默认值；用户可覆盖并注明来源。
+4. 随附螺栓、材料和表格数据库按项目约定作为正确的计算基线，状态为 `accepted_baseline`；`bundled_values_are_calculation_eligible = true`、`bundled_values_force_review_status = false`。不再仅因采用数据库数据而强制“待核验”。本次仅调整采信状态，不改工程数值，原始来源差异记录仍保留。
+5. 螺栓弹性模量 `ES` 默认取钢制螺栓典型值 205000 MPa，作为该基线的一部分；用户可覆盖并注明来源。经验垫片尺寸、模型近似和未知来源仍单独提示，不因数据库采信而消除。
 
 ## 数据字段
 
@@ -28,19 +28,19 @@
 |---|---|---|
 | `nominal_diameter_mm` | 螺纹公称直径 `d` | mm |
 | `pitch_mm` | 粗牙螺距 `P` | mm |
-| `pitch_diameter_d2_mm` | 外螺纹中径候选值 | mm；派生值，待核验 |
-| `external_thread_minor_diameter_d3_mm` | 外螺纹小径候选值 | mm；派生值，待核验 |
-| `tensile_stress_area_as_mm2` | 螺纹应力截面积候选值 | mm²；公式派生值，待核验 |
+| `pitch_diameter_d2_mm` | 外螺纹中径 | mm；采信的派生值 |
+| `external_thread_minor_diameter_d3_mm` | 外螺纹小径 | mm；采信的派生值 |
+| `tensile_stress_area_as_mm2` | 螺纹应力截面积 | mm²；采信的公式派生值 |
 | `area_a0_mm2` | VDI 2230 定义下的 `A0` | 当前为空；先确认符号定义及适用截面 |
 | `head_height_k_mm` | 六角头高度 | mm |
 | `width_across_flats_s_mm` | 对边宽度 | mm |
 | `head_corner_diameter_e_mm` | 对角尺寸 | mm；发现来源冲突时记录在 `field_conflicts` |
 | `thread_length_b1/b2/b3_mm` | ISO 4014 依长度段适用的螺纹长度 | mm；长度边界需按标准版本复核 |
 | `unthreaded_shank_length_h_mm` | ISO 4017 页面列出的无螺纹杆段参数 | mm |
-| `property_class_records` | 强度等级、直径区间、最低强度/证明应力 | MPa；二级来源，可参与计算但强制“待核验”（`requires_review_warning`） |
-| `head_bearing_diameter_dw_min_mm` | 螺栓头支承面外径 `dw,min` | mm；二级来源，待核验 |
+| `property_class_records` | 强度等级、直径区间、最低强度/证明应力 | MPa；项目采信基线，`requires_review_warning = false` |
+| `head_bearing_diameter_dw_min_mm` | 螺栓头支承面外径 `dw,min` | mm；保留二级来源记录，项目采信 |
 | `clearance_hole_fine/medium/coarse_mm` | ISO 273 通孔直径 | mm；默认取中等系列 |
-| `nut_iso4032_height_m_max_mm` / `nut_iso4032_bearing_diameter_dw_min_mm` | ISO 4032 螺母高度与支承直径 | mm；二级来源，待核验 |
+| `nut_iso4032_height_m_max_mm` / `nut_iso4032_bearing_diameter_dw_min_mm` | ISO 4032 螺母高度与支承直径 | mm；保留二级来源记录，项目采信 |
 | `candidate_nominal_lengths_mm` | 上游项目的通用候选长度 | mm；未按直径/标准验证，不作为权威标准长度表 |
 
 `A0` 不与 `As` 混用。数据库暂不为 `A0` 填值，以免在未确认 VDI 符号定义、危险截面和公式用途前误用。
@@ -49,7 +49,7 @@
 
 来源 ID、固定版本、字段映射和核验状态都保存在 `catalog.json` 的 `sources` 中。BOLTS 条目标为 LGPL-2.1-or-later；螺距、ISO 4017 交叉核对及候选长度分别来自 MIT 许可的 GitHub 项目，许可证副本保存在 `licenses/`。外部数值的许可和归属须随目录分发。
 
-本目录页面之间已发现少数 `e` 值不一致；因此保留冲突标记，而不是猜测。上游数据页面未声明标准版次。加入正式计算前，应针对用户选定的 ISO 版次和 VDI 2230 附录逐字段核验：尺寸、公差、长度适用区间、螺纹参数、应力面积、`A0` 定义以及 8.8/10.9/12.9 的直径分组强度值。复核通过后更新 `verification_status`、复核记录及目录版本，并为每个字段保留来源。
+本目录页面之间已发现少数 `e` 值不一致，差异继续记录在 `field_conflicts`；当前选定数值不变。上游数据页面未声明标准版次，此信息仍保留。`accepted_baseline` 表示项目默认采信，不宣称已经独立认证所有来源；来源审计备注、许可证及原始差异不被删除。通用长度列表仍只是建议，不保证每个直径/标准组合均可采购。
 
 ## 数据结构验证
 

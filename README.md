@@ -12,11 +12,14 @@ This local Python application (desktop and browser UI) has two modes:
   compares every safety factor with the printed values (all 12 within 3 %).
 
 Eccentric clamping/loading, bending, thermal effects and multi-bolt load
-distribution are outside the general model. All bundled catalog, material and
-table data are still **provisional** (not yet checked against the primary
-standards); every result based on them is therefore labelled
-**需确认 · 数据待核验** and must not be used as a final verdict. The tool does
-not replace the standard, engineering judgment, or design review.
+distribution are outside the general model. Bundled bolt, material and table
+data are **accepted as the project's calculation baseline** (`accepted_baseline`).
+Their values and source records are retained; using the database no longer
+forces a review verdict. This is a project acceptance policy, not a claim of
+independent certification. Empirical washer dimensions, unverified model
+assumptions and unknown source records still require review; failed checks
+remain failures. The tool does not replace the standard, engineering judgment,
+or design review.
 
 ### Ownership of inputs
 
@@ -34,7 +37,7 @@ used when switching to ESV. Both washers are off by default. Initial dimensions
 are empirical, not ISO catalog data: **di = 1.1d, Do = 2d, t = 0.16d** (mm;
 M12: 13.2 / 24 / 1.92). Unmodified estimates follow nominal-diameter changes;
 manual overrides remain unchanged. Material, modulus, limiting surface pressure
-and roughness are also editable. S355J0 is only a provisional starting material,
+and roughness are also editable. S355J0 is only the initial material selection,
 not a claim about the grade of any purchased washer.
 
 ### General-model assumptions
@@ -107,7 +110,7 @@ controls; fits 1280×720 without page scrolling; stacks below 1080 px width):
   Pass/fail/review retain distinct green/red/amber colors and text labels.
   Main text, muted text and status color pairs meet a 4.5:1 contrast threshold.
 - **Left** – inputs in four tabs (螺栓 / 板层 / 载荷 / 装配). Catalog and
-  material values are marked (cyan = catalog, amber = provisional source);
+  material values are marked (cyan = accepted catalog, amber = estimate/review);
   irrelevant fields (nut vs. tapped part, table vs. manual modes) are hidden.
 - **Center** – engineering-style SVG section: chamfered hex-head/nut profiles
   with curved face projections, unhatched bolt, fine thread-root lines,
@@ -147,6 +150,14 @@ even if they match a default name. Loaded design names and user-supplied
 provenance are also preserved.
 Invalid inputs remain invalid: export stays disabled, and the last valid
 drawing remains visibly marked as stale in the selected language.
+
+If a thickness edit makes the clamped stack too long for the selected bolt,
+the input is invalid: the old section is explicitly marked as stale, results
+are cleared and export is disabled. Correct the bolt length/engagement or the
+stack geometry to resume updating; the program never silently lengthens the
+bolt. English validation messages follow the same behavior as Chinese.
+Web input edits invalidate in-flight responses immediately, before the
+debounce timer fires, so an older result cannot re-enable export.
 
 The web selection is reflected in the URL: open
 <http://127.0.0.1:8765/?lang=en> for English or `?lang=zh` for Chinese.

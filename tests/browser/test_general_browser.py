@@ -48,6 +48,142 @@ class GeneralBrowserTests(unittest.TestCase):
     def metric(self, term: str):
         return self.page.locator(f"xpath=//dl[@id='key-metrics']//dt[normalize-space()='{term}']/following-sibling::dd[1]")
 
+    def test_browser_template_matching_prefers_specific_messages(self):
+        failures = self.page.evaluate("""() => Object.entries(i18n.templates).flatMap(([source, target]) => {
+            const message=source.replace(/\\{\\w+\\}/g, '1');
+            const expected=target.replace(/\\{\\w+\\}/g, '1');
+            try {
+                const actual=translateText(message, 'en');
+                return actual===expected ? [] : [{source, actual, expected}];
+            } catch(error) { return [{source, error:error.message}]; }
+        })""")
+        self.assertEqual(failures, [])
+
+    def test_geometry_and_load_edits_update_drawing_and_results(self):
+        page = self.page
+        page.locator("#language").select_option("en")
+        expect(page.locator("#report-preview")).to_contain_text("Calculation Report")
+        for tab, path, value, role, text in (
+            ("plates", "plates-0-thickness", "25", "dim-t1", "t1 25"),
+            ("plates", "joint-outer_diameter", "70", "dim-DA", "DA 70"),
+            ("bolt", "bolt-length", "65", "dim-l", "l 65"),
+            ("bolt", "bolt-bearing_friction", "0.10", "label-head", "μK 0.1"),
+            ("plates", "head_washer-enabled", True, "washer-head", "Head washer"),
+            ("plates", "head_washer-thickness", "3.2", "washer-head", "t 3.2"),
+        ):
+            with self.subTest(path=path):
+                page.locator(f"#tab-{tab}").click()
+                if path == "head_washer-enabled":
+                    page.locator("summary").get_by_text("Head washer", exact=True).click()
+                with page.expect_response(CALCULATE) as response:
+                    control = page.locator(f"#f-{path}")
+                    if value is True:
+                        control.check()
+                    else:
+                        control.fill(value)
+                self.assertEqual(response.value.status, 200)
+                expect(page.locator("#export")).to_be_enabled()
+                expect(page.locator("#section-stale")).to_be_hidden()
+                expect(page.locator(f"#section text[data-role='{role}']").filter(has_text=text)).to_have_count(1)
+        force = page.evaluate("state.result.values.find(value=>value.symbol==='FSmax').value")
+        page.locator("#tab-load").click()
+        with page.expect_response(CALCULATE) as response:
+            page.locator("#f-load-axial_max").fill("20000")
+        self.assertEqual(response.value.status, 200)
+        expect(page.locator("#export")).to_be_enabled()
+        self.assertNotEqual(page.evaluate("state.result.values.find(value=>value.symbol==='FSmax').value"), force)
+        self.assertEqual(page.evaluate("state.result.input.load.axial_max"), 20000)
+
+    def test_esv_thickness_error_keeps_stale_section_and_recovers_after_length_edit(self):
+        page = self.page
+        page.locator("#language").select_option("en")
+        page.locator("#f-joint-type").select_option("ESV")
+        page.locator("#f-bolt-catalog_variant_id").select_option("ISO4014-M18x2.5")
+        expect(page.locator("#f-bolt-d")).to_have_value("18")
+        page.locator("#f-bolt-length").fill("90")
+        page.locator("#tab-plates").click()
+        page.locator("summary").get_by_text("Head washer", exact=True).click()
+        page.locator("#f-head_washer-enabled").check()
+        for _ in range(3):
+            page.locator("#add-layer").click()
+        for index, thickness in enumerate((20, 5, 5, 5, 40)):
+            page.locator(".layer-select").nth(index).click()
+            page.locator(f"#f-plates-{index}-thickness").fill(str(thickness))
+        expect(self.metric("lK")).to_have_text("77.88 mm")
+        page.locator(".layer-select").nth(1).click()
+        with page.expect_response(CALCULATE) as response:
+            page.locator("#f-plates-1-thickness").fill("20")
+        self.assertEqual(response.value.status, 400)
+        expect(page.locator("#error")).to_contain_text("to allow thread engagement")
+        expect(page.locator("#section-stale")).to_be_visible()
+        expect(page.locator("#export")).to_be_disabled()
+        expect(page.locator("#report-preview")).to_be_empty()
+        expect(page.locator("#section text[data-role='plate-1']").filter(has_text="h 5")).to_have_count(1)
+        for index in (2, 3):
+            page.locator(".layer-select").nth(index).click()
+            page.locator(f"#f-plates-{index}-thickness").fill("20")
+        page.locator("#tab-bolt").click()
+        page.locator("#f-bolt-length").fill("160")
+        expect(self.metric("lK")).to_have_text("122.9 mm")
+        expect(page.locator("#section-stale")).to_be_hidden()
+        expect(page.locator("#export")).to_be_enabled()
+        self.assertEqual(page.evaluate("state.result.input.plates.map(plate=>plate.thickness)"), [20, 20, 20, 20, 40])
+        expect(page.locator("#section text[data-role='plate-1']").filter(has_text="h 20")).to_have_count(1)
+
+    def test_other_invalid_edits_keep_previous_section_and_recover(self):
+        page = self.page
+        page.locator("#language").select_option("en")
+        expect(page.locator("#report-preview")).to_contain_text("Calculation Report")
+        for tab, path, invalid in (
+            ("plates", "plates-0-thickness", "0"), ("bolt", "bolt-length", "10"),
+            ("plates", "joint-hole_diameter", "5"), ("bolt", "bolt-bearing_friction", "-1"),
+            ("load", "load-axial_min", "100000"),
+        ):
+            with self.subTest(path=path):
+                page.locator(f"#tab-{tab}").click()
+                control = page.locator(f"#f-{path}")
+                original = control.input_value()
+                previous_section = page.evaluate("JSON.stringify(state.section)")
+                with page.expect_response(CALCULATE) as response:
+                    control.fill(invalid)
+                self.assertEqual(response.value.status, 400)
+                expect(page.locator("#section-stale")).to_be_visible()
+                expect(page.locator("#export")).to_be_disabled()
+                expect(page.locator("#report-preview")).to_be_empty()
+                self.assertEqual(page.evaluate("JSON.stringify(state.section)"), previous_section)
+                self.assertNotRegex(page.locator("#error").text_content(), r"[\u4e00-\u9fff]")
+                with page.expect_response(CALCULATE) as response:
+                    control.fill(original)
+                self.assertEqual(response.value.status, 200)
+                expect(page.locator("#section-stale")).to_be_hidden()
+                expect(page.locator("#export")).to_be_enabled()
+
+    def test_edit_invalidates_inflight_result_before_debounce_fires(self):
+        page = self.page
+        held = []
+        page.route(CALCULATE, lambda route: held.append((route, route.fetch())))
+        page.clock.install(time=1800000000000)
+        page.clock.pause_at(1800000000000)
+        page.locator("#tab-plates").click()
+        page.locator("#f-plates-0-thickness").fill("25")
+        page.clock.run_for(300)
+        self.wait_until(lambda: len(held) == 1)
+        page.locator("#f-plates-0-thickness").fill("30")
+        with page.expect_response(CALCULATE):
+            route, response = held[0]
+            route.fulfill(response=response)
+        page.wait_for_timeout(50)
+        expect(page.locator("#export")).to_be_disabled()
+        self.assertNotEqual(page.evaluate("state.result.input.plates[0].thickness"), 25)
+        page.clock.run_for(300)
+        self.wait_until(lambda: len(held) == 2)
+        with page.expect_response(CALCULATE):
+            route, response = held[1]
+            route.fulfill(response=response)
+        expect(page.locator("#export")).to_be_enabled()
+        self.assertEqual(page.evaluate("state.result.input.plates[0].thickness"), 30)
+        expect(self.metric("lK")).to_have_text("50 mm")
+
     def test_default_startup_uses_english_names_and_report(self):
         page = self.page
         page.goto(self.base_url)
@@ -313,7 +449,7 @@ class GeneralBrowserTests(unittest.TestCase):
         self.assertLess(boxes[1]["x"], boxes[2]["x"])
         self.assertEqual(page.evaluate("getComputedStyle(document.body).fontSize"), "12px")
         self.assertLessEqual(page.locator("#f-bolt-d").bounding_box()["height"], 26)
-        expect(page.locator("#verdict")).to_have_text("需确认 · 数据待核验")
+        expect(page.locator("#verdict")).to_have_text("通过")
         expect(page.locator("#checks-table tbody tr[data-symbol='SF']")).to_be_visible()
         expect(self.plate_rects(0).first).to_be_attached()
         expect(self.plate_rects(1).first).to_be_attached()
@@ -325,7 +461,7 @@ class GeneralBrowserTests(unittest.TestCase):
         expect(page.locator("#panel-load")).to_be_visible()
         expect(page.locator("#panel-bolt")).to_be_hidden()
         page.get_by_role("tab", name="报告").click()
-        expect(page.locator("#report-preview")).to_contain_text("数据待核验")
+        expect(page.locator("#report-preview")).to_contain_text("总体判定：通过")
         expect(page.locator("#checks-table")).to_be_hidden()
         page.get_by_role("tab", name="全部结果").click()
         page.locator("#value-filter").fill("FMzul")
@@ -392,12 +528,12 @@ class GeneralBrowserTests(unittest.TestCase):
         expect(page.locator("#f-bolt-d")).to_have_value("16")
         expect(page.locator("#f-bolt-pitch")).to_have_value("2")
         marker = page.locator('.field[data-path="bolt.d"] .src')
-        expect(marker).to_have_class(re.compile(r"\bprovisional\b"))
+        expect(marker).to_have_class(re.compile(r"\bcatalog\b"))
         expect(self.export).to_be_enabled()
         expect(page.locator("#section > text").first).to_be_attached()
         expect(page.locator("#section")).to_contain_text("M16")
         page.locator("#f-bolt-head_height").fill("10.5")
-        expect(page.locator('.field[data-path="bolt.head_height"] .src')).not_to_have_class(re.compile("provisional"))
+        expect(page.locator('.field[data-path="bolt.head_height"] .src')).to_have_class("src")
         expect(self.export).to_be_enabled()
 
     def test_tapped_joint_hides_nut_fields(self) -> None:
@@ -424,7 +560,7 @@ class GeneralBrowserTests(unittest.TestCase):
             text = path.read_text(encoding="utf-8")
         self.assertEqual(text, page.locator("#report-preview").text_content())
         self.assertIn("法兰 A", text)
-        self.assertIn("数据待核验", text)
+        self.assertIn("总体判定：通过", text)
 
     def test_late_response_does_not_replace_newer_result(self) -> None:
         page = self.page

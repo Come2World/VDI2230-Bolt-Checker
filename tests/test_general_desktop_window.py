@@ -59,11 +59,110 @@ class GeneralWindowTests(unittest.TestCase):
         except tk.TclError as exc:
             self.skipTest(f"Tk 不可用：{exc}")
         self.root.withdraw()
+        self.callback_errors = []
+        self.root.report_callback_exception = lambda kind, value, tb: self.callback_errors.append(str(value))
         self.window = GeneralWindow(self.root, language="zh")
         self.window.calculate_now()
 
     def tearDown(self):
-        self.window.close()
+        try:
+            self.assertEqual(self.callback_errors, [])
+        finally:
+            self.window.close()
+
+    def finish_scheduled_calculation(self):
+        self.root.after(400, self.root.quit)
+        self.root.mainloop()
+
+    def test_geometry_and_load_edits_refresh_through_real_debounce_callbacks(self):
+        window = self.window
+        window.set_language("en")
+        for path, value, role, text in (
+            ("plates[0].thickness", "25", "dim-t1", "t1 25"),
+            ("joint.outer_diameter", "70", "dim-DA", "DA 70"),
+            ("bolt.length", "65", "dim-l", "l 65"),
+            ("bolt.bearing_friction", "0.10", "label-head", "μK 0.1"),
+            ("head_washer.enabled", True, "washer-head", "Head washer"),
+            ("head_washer.thickness", "3.2", "washer-head", "t 3.2"),
+        ):
+            with self.subTest(path=path):
+                window._vars[path].set(value)
+                self.assertTrue(window.export_button.instate(["disabled"]))
+                self.finish_scheduled_calculation()
+                self.assertTrue(window.outcome.ok, window.outcome.error)
+                self.assertFalse(window.canvas.find_withtag("stale"))
+                labels = [window.canvas.itemcget(item, "text") for item in window.canvas.find_withtag(role)
+                          if window.canvas.type(item) == "text"]
+                self.assertTrue(any(text in label for label in labels), labels)
+        force = window.outcome.result.value("FSmax")
+        window._vars["load.axial_max"].set("20000")
+        self.finish_scheduled_calculation()
+        self.assertTrue(window.outcome.ok, window.outcome.error)
+        self.assertNotEqual(window.outcome.result.value("FSmax"), force)
+        self.assertEqual(window.outcome.result.input.load.axial_max, 20000)
+        self.assertEqual(window.report(), window.outcome.report)
+
+    def test_invalid_edits_mark_old_section_and_recover_for_other_parameters(self):
+        window = self.window
+        window.set_language("en")
+        for path, invalid in (
+            ("plates[0].thickness", "0"), ("bolt.length", "10"),
+            ("joint.hole_diameter", "5"), ("bolt.bearing_friction", "-1"),
+            ("load.axial_min", "100000"),
+        ):
+            with self.subTest(path=path):
+                original = window._vars[path].get()
+                last_good = window._last_good
+                window._vars[path].set(invalid)
+                self.finish_scheduled_calculation()
+                self.assertFalse(window.outcome.ok)
+                self.assertIs(window._last_good, last_good)
+                self.assertTrue(window.canvas.find_withtag("stale"))
+                self.assertTrue(window.export_button.instate(["disabled"]))
+                self.assertEqual(window.report(), "")
+                self.assertIn(path, [error.path for error in window.outcome.field_errors])
+                self.assertNotRegex(window.outcome.error, r"[\u4e00-\u9fff]")
+                window._vars[path].set(original)
+                self.finish_scheduled_calculation()
+                self.assertTrue(window.outcome.ok, window.outcome.error)
+                self.assertFalse(window.canvas.find_withtag("stale"))
+                self.assertTrue(window.export_button.instate(["!disabled"]))
+
+    def test_esv_thickness_edit_reports_short_bolt_and_recovers_without_callback_errors(self):
+        window = self.window
+        model = window.model
+        model.set_value("joint.type", "ESV")
+        model.set_value("assembly.tighten_side", "head")
+        model.set_value("bolt.catalog_variant_id", "ISO4014-M18x2.5")
+        model.set_value("bolt.length", 90)
+        model.set_value("head_washer.enabled", True)
+        while len(model.layers) < 5:
+            model.add_layer()
+        for index, thickness in enumerate((20, 5, 5, 5, 40)):
+            model.set_layer_value(index, "thickness", thickness)
+        window.set_language("en")
+        window.select_layer(1, reveal=True)
+        self.assertTrue(window.calculate_now().ok)
+        self.assertAlmostEqual(window._last_good.metrics.clamp_length, 77.88)
+        window._vars["plates[1].thickness"].set("20")
+        self.finish_scheduled_calculation()
+        self.assertFalse(window.outcome.ok)
+        self.assertIn("to allow thread engagement", window.outcome.field_errors[0].message)
+        self.assertTrue(window.canvas.find_withtag("stale"))
+        self.assertTrue(window.export_button.instate(["disabled"]))
+        self.assertEqual(window.report(), "")
+        for index in (2, 3):
+            window.select_layer(index)
+            window._vars[f"plates[{index}].thickness"].set("20")
+        window._vars["bolt.length"].set("160")
+        self.finish_scheduled_calculation()
+        self.assertTrue(window.outcome.ok, window.outcome.error)
+        self.assertAlmostEqual(window._last_good.metrics.clamp_length, 122.88)
+        self.assertFalse(window.canvas.find_withtag("stale"))
+        self.assertTrue(window.export_button.instate(["!disabled"]))
+        labels = [window.canvas.itemcget(item, "text") for item in window.canvas.find_withtag("dim-t2")
+                  if window.canvas.type(item) == "text"]
+        self.assertIn("t2 20", labels)
 
     def set_choice(self, path, value):
         label = self.window._choices[path][0][value]
@@ -74,7 +173,7 @@ class GeneralWindowTests(unittest.TestCase):
 
     def test_default_case_renders_checks_section_and_report(self):
         window = self.window
-        self.assertEqual(window.verdict_label.cget("text"), "需确认 · 数据待核验")
+        self.assertEqual(window.verdict_label.cget("text"), "通过")
         self.assertIn("SF", window.check_tree.get_children())
         self.assertEqual(window.check_tree.set("SF", "status"), "通过")
         self.assertTrue(window.canvas.find_withtag("plate-0"))

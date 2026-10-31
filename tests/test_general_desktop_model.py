@@ -234,11 +234,11 @@ class GeneralFormModelTests(unittest.TestCase):
         self.assertEqual(item["provenance"]["plates[2].youngs_modulus"], "material:E295")
         self.assertEqual(item["provenance"]["bolt.d"], "catalog:ISO4014-M12x1.75")
 
-    def test_calculate_default_case_needs_confirmation(self):
+    def test_calculate_default_case_accepts_bundled_data(self):
         outcome = self.model.calculate()
         self.assertTrue(outcome.ok)
-        self.assertEqual(outcome.result.verdict_label, "需确认 · 数据待核验")
-        self.assertIn("bolt.d", self.model.provisional)
+        self.assertEqual(outcome.result.verdict_label, "通过")
+        self.assertEqual(self.model.provisional, set())
         self.assertIn("通用螺栓连接", outcome.report)
         self.assertIn("SF", {check.symbol for check in outcome.result.checks})
 

@@ -13,7 +13,7 @@ class PlateMaterialTests(unittest.TestCase):
             self.assertGreater(row.youngs_modulus, 40_000)
             self.assertGreater(row.limiting_surface_pressure, 0)
             self.assertGreaterEqual(row.tensile_strength, row.yield_strength)
-            self.assertEqual(row.verification_status, "provisional")
+            self.assertEqual(row.verification_status, "accepted_baseline")
 
     def test_known_table_a9_rows(self):
         steel = data.material("S235JRG1")
@@ -28,6 +28,16 @@ class PlateMaterialTests(unittest.TestCase):
 
 
 class VdiTableTests(unittest.TestCase):
+    def test_bundled_tables_and_derived_bolt_variants_are_accepted(self):
+        for row in data.bolt_variants():
+            self.assertEqual(row.verification_status, "accepted_baseline")
+            self.assertFalse(data.source_is_provisional(f"catalog:{row.variant_id}"))
+        for key in ("load_introduction_factor_n", "embedding_um", "shear_strength_ratio",
+                    "friction_classes", "tightening_factor_alpha_a"):
+            self.assertEqual(data.table_status(key), "accepted_baseline")
+            self.assertFalse(data.source_is_provisional(f"table:{key}"))
+        self.assertEqual(data.catalog_summary()["status"], "accepted_baseline")
+
     def test_table_2_grid_points_and_bilinear_interpolation(self):
         self.assertEqual(data.load_introduction_factor("SV1", 0, 0), 0.7)
         self.assertEqual(data.load_introduction_factor("SV6", 0.3, 0.5), 0.03)

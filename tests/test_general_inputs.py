@@ -172,10 +172,10 @@ class GeneralSchemaTests(unittest.TestCase):
 
 class ProvenanceTests(unittest.TestCase):
     def test_source_is_provisional(self) -> None:
-        self.assertTrue(engineering_data.source_is_provisional("catalog:ISO4014-M12x1.75"))
-        self.assertTrue(engineering_data.source_is_provisional("material:S355J0"))
-        self.assertTrue(engineering_data.source_is_provisional("table:embedding_um"))
-        self.assertTrue(engineering_data.source_is_provisional("class:8.8"))
+        self.assertFalse(engineering_data.source_is_provisional("catalog:ISO4014-M12x1.75"))
+        self.assertFalse(engineering_data.source_is_provisional("material:S355J0"))
+        self.assertFalse(engineering_data.source_is_provisional("table:embedding_um"))
+        self.assertFalse(engineering_data.source_is_provisional("class:8.8"))
         self.assertTrue(engineering_data.source_is_provisional("catalog:unknown"))
         self.assertTrue(engineering_data.source_is_provisional("default:anything"))
         self.assertFalse(engineering_data.source_is_provisional("user"))
