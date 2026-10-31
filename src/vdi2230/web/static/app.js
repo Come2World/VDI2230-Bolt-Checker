@@ -31,6 +31,7 @@ const state = {
   layers: [],
   selected: 0,
   result: null,
+  section: null,
   fieldErrors: [],
   provisional: new Set(),
   seq: 0,
@@ -77,12 +78,12 @@ function fmt(value) {
 async function getJson(url) {
   const response = await fetch(url);
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error || `请求失败（${response.status}）`);
+  if (!response.ok) throw new Error(t(data.error || `请求失败（${response.status}）`));
   return data;
 }
 
 function setStatus(text) {
-  $("#status").textContent = text;
+  $("#status").textContent = t(text);
 }
 
 /* ---------- form fields ---------- */
@@ -104,18 +105,18 @@ function writeControl(control, value) {
 function fieldRow(spec, path, value, onChange, options) {
   const id = fieldId(path);
   const row = el("div", { class: "field", "data-path": path });
-  const label = el("label", { for: id, title: [spec.label, spec.help].filter(Boolean).join(" — ") }, spec.label);
+  const label = el("label", { for: id, title: [spec.label, spec.help].filter(Boolean).map(t).join(" — ") }, t(spec.label));
   if (spec.unit) label.append(el("span", { class: "unit" }, spec.unit));
   let control;
   if (options || spec.kind === "choice") {
     control = el("select", { id });
-    for (const [optionValue, text] of options || spec.choices) control.append(el("option", { value: optionValue }, text));
+    for (const [optionValue, text] of options || spec.choices) control.append(el("option", { value: optionValue }, t(text)));
   } else if (spec.kind === "bool") {
     control = el("input", { id, type: "checkbox" });
   } else {
     control = el("input", { id, type: "text", autocomplete: "off", spellcheck: "false" });
     if (spec.kind !== "text") control.inputMode = "decimal";
-    if (spec.optional && spec.help) control.placeholder = spec.help.split("；")[0];
+    if (spec.optional && spec.help) control.placeholder = t(spec.help).split(/[；;]/)[0];
   }
   writeControl(control, value);
   const event = control.tagName === "SELECT" || control.type === "checkbox" ? "change" : "input";
@@ -140,7 +141,8 @@ function updateSource(path) {
   if (source && source !== "user") {
     const provisional = state.provisional.has(path) || source.startsWith("default:");
     marker.classList.add(provisional ? "provisional" : "catalog");
-    marker.title = provisional ? `${source}（数据待核验）` : source;
+    const shown = source.startsWith("default:") ? t(source) : source;
+    marker.title = provisional ? tf("{source}（数据待核验）", { source: shown }) : shown;
   }
 }
 
@@ -180,7 +182,7 @@ function renderForm() {
     const title = subsectionOf(spec);
     const key = `${spec.group}|${title}`;
     if (!sections.has(key)) {
-      const details = el("details", { class: "group", open: !COLLAPSED.has(title) }, el("summary", {}, title));
+      const details = el("details", { class: "group", "data-section": key, open: !COLLAPSED.has(title) }, el("summary", {}, t(title)));
       containers[spec.group].append(details);
       sections.set(key, details);
     }
@@ -327,16 +329,16 @@ async function loadCatalog(force) {
 /* ---------- layers ---------- */
 
 function layerName(index) {
-  return state.layers[index]?.values.name || `板层 ${index + 1}`;
+  return state.layers[index]?.values.name || t(`板层 ${index + 1}`);
 }
 
 function layerSummary(layer, index) {
   const v = layer.values;
-  return `${index + 1}. ${v.name || "（未命名）"} · ${v.material_id || "自定义"} · h ${fmt(v.thickness)}`;
+  return `${index + 1}. ${v.name || t("（未命名）")} · ${v.material_id || t("自定义")} · h ${fmt(v.thickness)}`;
 }
 
 function actionButton(text, label, disabled, handler) {
-  const button = el("button", { type: "button", "aria-label": label, title: label, disabled }, text);
+  const button = el("button", { type: "button", "aria-label": t(label), title: t(label), disabled }, text);
   button.addEventListener("click", handler);
   return button;
 }
@@ -349,7 +351,7 @@ function renderLayers() {
     const selected = index === state.selected;
     const item = el("li", { class: `layer${selected ? " selected" : ""}`, "data-index": index });
     const pick = el("button", {
-      type: "button", class: "layer-select", "aria-expanded": String(selected), "aria-label": `编辑板层 ${index + 1}`,
+      type: "button", class: "layer-select", "aria-expanded": String(selected), "aria-label": t(`编辑板层 ${index + 1}`),
     }, layerSummary(layer, index));
     pick.addEventListener("click", () => selectLayer(index));
     const actions = el("span", { class: "layer-actions" },
@@ -366,7 +368,7 @@ function renderLayers() {
   $("#add-layer").disabled = full;
   $("#section-add-layer").disabled = full;
   $("#section-remove-layer").disabled = state.layers.length <= 1;
-  $("#selected-layer").textContent = `选中：${state.selected + 1}. ${layerName(state.selected)}`;
+  $("#selected-layer").textContent = tf("选中：{name}", { name: `${state.selected + 1}. ${layerName(state.selected)}` });
   markErrors();
 }
 
@@ -380,7 +382,7 @@ function layerFields(layer, index, pick) {
       if (spec.path === "material_id") applyLayerMaterial(layer, index, value);
       updateSource(path);
       pick.textContent = layerSummary(layer, index);
-      $("#selected-layer").textContent = `选中：${index + 1}. ${layerName(index)}`;
+      $("#selected-layer").textContent = tf("选中：{name}", { name: `${index + 1}. ${layerName(index)}` });
       scheduleCalculation();
     };
     const options = spec.path === "material_id" ? materialOptions() : undefined;
@@ -508,7 +510,7 @@ async function calculate() {
     response = await fetch("/api/general/calculate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ input: buildInput(), view }),
+      body: JSON.stringify({ input: buildInput(), view, language: i18n.language }),
     });
     data = await response.json();
   } catch {
@@ -539,7 +541,7 @@ function fail(message, fieldErrors) {
   clearResults();
   state.fieldErrors = fieldErrors;
   const verdict = $("#verdict");
-  verdict.textContent = fieldErrors.length ? "输入有误" : "计算失败";
+  verdict.textContent = t(fieldErrors.length ? "输入有误" : "计算失败");
   verdict.dataset.status = "不通过";
   $("#section").classList.add("stale");
   $("#section-stale").hidden = false;
@@ -550,15 +552,15 @@ function fail(message, fieldErrors) {
 
 function labelForPath(path) {
   const layer = /^plates\[(\d+)]\.(\w+)$/.exec(path);
-  if (layer) return `板层 ${Number(layer[1]) + 1} · ${state.layerSpecs.get(layer[2])?.label || layer[2]}`;
+  if (layer) return `${t(`板层 ${Number(layer[1]) + 1}`)} · ${t(state.layerSpecs.get(layer[2])?.label || layer[2])}`;
   const spec = state.specs.get(path);
   const prefix = { head_washer: "头侧垫片 · ", nut_washer: "螺母侧垫片 · " }[path.split(".")[0]] || "";
-  return prefix + (spec?.label || path || "输入");
+  return (prefix ? t(prefix.slice(0, -3)) + " · " : "") + t(spec?.label || path || "输入");
 }
 
 function showError(message, fieldErrors) {
   const box = $("#error");
-  box.replaceChildren(el("div", {}, message));
+  box.replaceChildren(el("div", {}, t(message)));
   if (fieldErrors.length) {
     const list = el("ul");
     for (const error of fieldErrors) {
@@ -618,12 +620,12 @@ function render(data) {
   banner.dataset.status = data.verdict;
   const failing = data.checks.filter((check) => check.status === "不通过").map((check) => check.symbol);
   banner.replaceChildren(
-    `总体判定：${data.verdict_label}`,
+    `${t("总体判定")}: ${data.verdict_label}`,
     el("small", {}, failing.length
-      ? `不通过：${failing.join("、")}`
+      ? tf("不通过：{symbols}", { symbols: failing.join(", ") })
       : data.provisional_sources.length
-        ? "计算校核均满足要求，但数据或模型假设待核验，结果不得作为最终结论。"
-        : "全部校核满足要求。"),
+        ? t("计算校核均满足要求，但数据或模型假设待核验，结果不得作为最终结论。")
+        : t("全部校核满足要求。")),
   );
   banner.hidden = false;
 
@@ -636,13 +638,13 @@ function render(data) {
       label,
       el("td", { class: "num" }, check.value === null ? "—" : `${fmt(check.value)}${unit}`),
       el("td", { class: "num" }, check.required === null ? "—" : `≥ ${fmt(check.required)}${unit}`),
-      el("td", {}, el("span", { class: "badge", "data-status": check.status }, check.status)));
+      el("td", {}, el("span", { class: "badge", "data-status": check.status }, check.status_label)));
   }));
 
   state.provisional = new Set(data.provisional_sources.map((entry) => entry.split(" ← ")[0]));
   const provisional = $("#provisional");
   $("#provisional-count").textContent = `(${data.provisional_sources.length})`;
-  $("ul", provisional).replaceChildren(...data.provisional_sources.map((entry) => el("li", {}, entry)));
+  $("ul", provisional).replaceChildren(...data.provisional_labels.map((entry) => el("li", {}, entry)));
   provisional.hidden = data.provisional_sources.length === 0;
   for (const row of $$(".field[data-path]")) updateSource(row.dataset.path);
 
@@ -702,7 +704,7 @@ function svgShape(shape) {
       x: p[0], y: p[1], "text-anchor": shape.anchor, "dominant-baseline": "central", "font-size": shape.size,
       transform: shape.rotate ? `rotate(${shape.rotate} ${p[0]} ${p[1]})` : null,
     });
-    node.textContent = shape.text;
+    node.textContent = shape.text_by_language[i18n.language];
   }
   node.setAttribute("fill", shape.kind === "line" ? "none" : shape.fill || "none");
   node.setAttribute("stroke", shape.stroke || "none");
@@ -717,6 +719,7 @@ function svgShape(shape) {
 }
 
 function drawSection(section) {
+  state.section = section;
   const svg = $("#section");
   svg.replaceChildren();
   svg.setAttribute("viewBox", `0 0 ${section.width} ${section.height}`);
@@ -724,7 +727,7 @@ function drawSection(section) {
     const node = svgShape(shape);
     if (shape.target && ["rect", "polygon"].includes(shape.kind)) {
       const title = svgEl("title", {});
-      title.textContent = `点击编辑：${labelForPath(shape.target)}`;
+      title.textContent = tf("点击编辑：{label}", { label: labelForPath(shape.target) });
       node.append(title);
       node.setAttribute("tabindex", "0");
       node.setAttribute("aria-label", title.textContent);
@@ -772,7 +775,10 @@ function loadDefaults(defaults) {
 
 async function init() {
   try {
-    const [schema, catalog] = await Promise.all([getJson("/api/general/schema"), getJson("/api/general/catalog")]);
+    const [schema, catalog, translations] = await Promise.all([
+      getJson("/api/general/schema"), getJson("/api/general/catalog"), getJson("/api/general/translations"),
+    ]);
+    initializeTranslations(translations);
     state.schema = schema;
     state.catalog = catalog;
   } catch (error) {
@@ -796,6 +802,32 @@ async function init() {
   $("#project-title").addEventListener("input", () => scheduleCalculation(400));
   $("#value-filter").addEventListener("input", filterValues);
   $("#export").addEventListener("click", exportReport);
+  $("#language").addEventListener("change", () => {
+    const language = $("#language").value;
+    if (!["zh", "en"].includes(language)) throw new Error("Unsupported language");
+    ++state.seq;
+    clearTimeout(state.timer);
+    $("#export").disabled = true;
+    i18n.language = language;
+    const url = new URL(location.href);
+    url.searchParams.set("lang", language);
+    history.replaceState(null, "", url);
+    translateStatic();
+    const opened = new Map($$("details.group").map((node) => [node.dataset.section, node.open]));
+    const entered = new Map($$(".field input:not([type='checkbox'])").map((node) => [node.id, node.value]));
+    for (const selector of ["#panel-bolt", "#plates-fields", "#panel-load", "#panel-assembly"]) $(selector).replaceChildren();
+    $("#bolt-lengths")?.remove();
+    renderForm();
+    for (const node of $$("details.group")) node.open = opened.get(node.dataset.section) ?? node.open;
+    renderLayers();
+    for (const [id, value] of entered) {
+      const control = document.getElementById(id);
+      if (control) control.value = value;
+    }
+    applyVisibility();
+    if (state.section) drawSection(state.section);
+    calculate();
+  });
   $("#section").addEventListener("click", (event) => {
     const target = event.target.closest("[data-target]")?.dataset.target;
     if (target) goToField(target);

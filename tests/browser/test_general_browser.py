@@ -47,6 +47,83 @@ class GeneralBrowserTests(unittest.TestCase):
     def metric(self, term: str):
         return self.page.locator(f"xpath=//dl[@id='key-metrics']//dt[normalize-space()='{term}']/following-sibling::dd[1]")
 
+    def test_language_switch_preserves_inputs_results_and_localizes_download(self):
+        page = self.page
+        page.set_viewport_size({"width": 1280, "height": 720})
+        page.locator("#project-title").fill("用户标题 <script>")
+        page.locator("#f-bolt-bearing_friction").fill("0.10")
+        self.enable_washers()
+        page.locator("#f-plates-0-name").fill("用户板层")
+        with page.expect_response(CALCULATE) as response:
+            page.locator("#language").select_option("en")
+        english = response.value.json()
+        expect(page.locator("#export")).to_be_enabled()
+        expect(page.locator("html")).to_have_attribute("lang", "en")
+        expect(page.locator("#tab-plates")).to_have_text("Plates")
+        expect(page.locator("#tab-plates")).to_have_attribute("aria-selected", "true")
+        expect(page.locator("#project-title")).to_have_value("用户标题 <script>")
+        expect(page.locator("#f-bolt-bearing_friction")).to_have_value("0.10")
+        expect(page.locator("#f-head_washer-enabled")).to_be_checked()
+        expect(page.locator("#f-plates-0-name")).to_have_value("用户板层")
+        expect(page.locator("#report-preview")).to_contain_text("Warnings and assumptions")
+        expect(page.locator("#report-preview")).to_contain_text("用户标题 <script>")
+        self.assertEqual(page.evaluate("document.documentElement.scrollWidth <= innerWidth"), True)
+        self.assertEqual(page.evaluate("document.documentElement.scrollHeight <= innerHeight"), True)
+        with page.expect_download() as download:
+            page.locator("#export").click()
+        text = Path(download.value.path()).read_text(encoding="utf-8")
+        self.assertEqual(text, page.locator("#report-preview").text_content())
+        with page.expect_response(CALCULATE) as response:
+            page.locator("#language").select_option("zh")
+        chinese = response.value.json()
+        self.assertEqual(chinese["input"], english["input"])
+        self.assertEqual([(v["symbol"], v["value"]) for v in chinese["values"]],
+                         [(v["symbol"], v["value"]) for v in english["values"]])
+        expect(page.locator("#report-preview")).to_contain_text("计算报告")
+
+    def test_english_startup_and_invalid_input_keep_export_disabled(self):
+        page = self.page
+        page.goto(self.base_url + "/?lang=en")
+        expect(page.get_by_role("button", name="Export TXT")).to_be_enabled()
+        expect(page.locator("label[for='f-bolt-thread_friction']")).to_have_text("Thread friction μG")
+        page.locator("#language").select_option("zh")
+        expect(page.locator("#report-preview")).to_contain_text("计算报告")
+        page.locator("#f-bolt-d").fill("abc")
+        expect(page.locator("#export")).to_be_disabled()
+        page.locator("#language").select_option("en")
+        expect(page.locator("#error")).to_contain_text("Must be numeric")
+        expect(page.locator("#f-bolt-d")).to_have_value("abc")
+        expect(page.locator("#export")).to_be_disabled()
+        expect(page.locator("#section-stale")).to_be_visible()
+        expect(page.locator("#section [data-role='label-head']").filter(has_text="Bolt head")).to_have_count(1)
+        page.reload()
+        expect(page.get_by_role("button", name="Export TXT")).to_be_enabled()
+        expect(page.locator("html")).to_have_attribute("lang", "en")
+
+    def test_late_response_cannot_restore_previous_report_language(self):
+        page = self.page
+        held = []
+
+        def delay_english(route):
+            if route.request.post_data_json.get("language") == "en":
+                held.append((route, route.fetch()))
+            else:
+                route.continue_()
+
+        page.route(CALCULATE, delay_english)
+        page.locator("#language").select_option("en")
+        self.wait_until(lambda: bool(held))
+        expect(page.locator("#export")).to_be_disabled()
+        page.locator("#language").select_option("zh")
+        expect(page.locator("#export")).to_be_enabled()
+        expect(page.locator("#report-preview")).to_contain_text("计算报告")
+        with page.expect_response(lambda response: response.request.post_data_json.get("language") == "en"):
+            for route, response in held:
+                route.fulfill(response=response)
+        page.wait_for_timeout(100)
+        self.assertEqual(page.evaluate("state.result.language"), "zh")
+        expect(page.locator("#report-preview")).to_contain_text("计算报告")
+
     def wait_until(self, predicate, timeout_ms: int = 5000) -> None:
         for _ in range(timeout_ms // 20):
             if predicate():

@@ -79,6 +79,49 @@ class GeneralWindowTests(unittest.TestCase):
         self.assertTrue(window.values_tree.get_children())
         self.assertTrue(window.export_button.instate(["!disabled"]))
 
+    def test_language_switch_preserves_inputs_selection_and_exports_english(self):
+        window = self.window
+        window.title_var.set("保留项目标题")
+        window._vars["bolt.bearing_friction"].set("0.10")
+        window.model.set_layer_value(1, "name", "用户板层")
+        window.select_layer(1, reveal=True)
+        before = window.calculate_now()
+        inputs = window.model.to_input_json()
+        window.language_var.set("English")
+        window.language_selector.event_generate("<<ComboboxSelected>>")
+        self.root.update()
+        self.assertEqual(window.language, "en")
+        self.assertEqual(window._vars["bolt.bearing_friction"].get(), "0.10")
+        self.assertEqual(window.model.to_input_json(), inputs)
+        self.assertEqual(window.model.selected, 1)
+        self.assertEqual(window.input_tabs.index("current"), window._tab_index["plates"])
+        self.assertEqual(window.check_tree.set("SF", "status"), "Pass")
+        self.assertEqual(window.outcome.result.value("MA"), before.result.value("MA"))
+        self.assertIn("保留项目标题", window.report())
+        self.assertIn("Bearing friction μK", window.report())
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "report-en.txt"
+            window.export_report(target)
+            self.assertEqual(target.read_text(encoding="utf-8"), window.report())
+        window.set_language("zh")
+        self.assertEqual(window.model.to_input_json(), inputs)
+        self.assertIn("计算报告", window.report())
+        self.assertEqual(window.check_tree.set("SF", "status"), "通过")
+
+    def test_language_switch_keeps_invalid_input_and_localizes_stale_section(self):
+        window = self.window
+        window._vars["bolt.d"].set("abc")
+        window.calculate_now()
+        window.set_language("en")
+        self.assertEqual(window._vars["bolt.d"].get(), "abc")
+        self.assertFalse(window.outcome.ok)
+        self.assertIn("Invalid input", window.outcome.error)
+        self.assertTrue(window.export_button.instate(["disabled"]))
+        self.assertTrue(window.canvas.find_withtag("stale"))
+        labels = [window.canvas.itemcget(item, "text") for item in window.canvas.find_withtag("label-head")
+                  if window.canvas.type(item) == "text"]
+        self.assertTrue(any("Bolt head" in label for label in labels))
+
     def test_values_filter_narrows_the_list(self):
         window = self.window
         total = len(window.values_tree.get_children())

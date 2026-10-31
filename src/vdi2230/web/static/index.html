@@ -6,6 +6,7 @@
   <title>VDI 2230 · 螺栓连接计算</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/styles.css">
+  <script src="/i18n.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
@@ -14,6 +15,10 @@
     <input id="project-title" class="project-title" aria-label="项目标题" maxlength="120" autocomplete="off">
     <span id="status" class="status" role="status">正在加载…</span>
     <span id="verdict" class="verdict" data-status="">—</span>
+    <select id="language" class="language-select" aria-label="语言 / Language" data-no-translate>
+      <option value="zh">中文</option>
+      <option value="en">English</option>
+    </select>
     <a class="ref-link" href="/reference">参考算例 B1–B5 ↗</a>
   </header>
 

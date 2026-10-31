@@ -15,6 +15,8 @@ from vdi2230.calculations.general import (
     deformation_diameter,
 )
 from vdi2230.domain.general_inputs import GeneralInput
+from functools import partial
+from vdi2230.i18n import Language, translate
 
 
 MIN_VIEW = 200
@@ -112,7 +114,10 @@ def general_section_shapes(
     metrics: SectionMetrics,
     width: float,
     height: float,
+    *,
+    language: Language = "zh",
 ) -> tuple[Shape, ...]:
+    t = partial(translate, language=language)
     if not (MIN_VIEW <= width <= MAX_VIEW and MIN_VIEW <= height <= MAX_VIEW):
         raise ValueError(f"绘图区域须在 {MIN_VIEW}–{MAX_VIEW} px 之间")
     bolt, joint, nut = item.bolt, item.joint, item.nut
@@ -257,14 +262,14 @@ def general_section_shapes(
                         role="axis", dash_pattern=(12, 4, 2, 4), stroke_width=0.8))
 
     shapes.extend(_dimensions(item, metrics, cx, y, half, gx0, gy1))
-    shapes.extend(_labels(item, metrics, cx, y, half, head_width, nut_width, gx1 + 10, gy0, gy1, y_top))
+    shapes.extend(_labels(item, metrics, cx, y, half, head_width, nut_width, gx1 + 10, gy0, gy1, y_top, language))
     class_text = f" · {bolt.property_class}" if bolt.property_class else ""
-    bore_text = f" · 空心 db {_fmt(bolt.bore_diameter)}" if bolt.bore_diameter else ""
-    shank_text = f" · 细腰 dT {_fmt(bolt.shank_diameter)}" if bolt.shank_diameter and bolt.shank_diameter < bolt.d else ""
+    bore_text = f" · {t('空心')} db {_fmt(bolt.bore_diameter)}" if bolt.bore_diameter else ""
+    shank_text = f" · {t('细腰')} dT {_fmt(bolt.shank_diameter)}" if bolt.shank_diameter and bolt.shank_diameter < bolt.d else ""
     shapes.append(Shape(
         "text", (pad, pad + 6),
         fill=TEXT_FILL, size=12,
-        text=f"{'DSV 螺栓 + 螺母' if dsv else 'ESV 螺纹孔'} · M{_fmt(bolt.d)}×{_fmt(bolt.pitch)}{class_text} · l {_fmt(bolt.length)}{bore_text}{shank_text}",
+        text=f"{t('DSV 螺栓 + 螺母' if dsv else 'ESV 螺纹孔')} · M{_fmt(bolt.d)}×{_fmt(bolt.pitch)}{class_text} · l {_fmt(bolt.length)}{bore_text}{shank_text}",
         role="title",
     ))
     return tuple(shapes)
@@ -326,7 +331,8 @@ def _place_labels(anchors: list[float], step: float, top_limit: float, bottom_li
     return placed
 
 
-def _labels(item, metrics, cx, y, half, head_width, nut_width, label_x, top_limit, bottom_limit, y_top) -> list[Shape]:
+def _labels(item, metrics, cx, y, half, head_width, nut_width, label_x, top_limit, bottom_limit, y_top, language: Language = "zh") -> list[Shape]:
+    t = partial(translate, language=language)
     bolt, nut, tapped = item.bolt, item.nut, item.tapped
     dsv = item.is_through_bolt
     layers = item.plates
@@ -335,9 +341,9 @@ def _labels(item, metrics, cx, y, half, head_width, nut_width, label_x, top_limi
     entries: list[tuple[float, float, str, str, str, str]] = [(
         (y_top + y(0.0)) / 2,
         cx + half(head_width),
-        f"螺栓头 {'外六角' if bolt.head_type == 'hex' else '内六角'}",
+        f"{t('螺栓头')} {t('外六角' if bolt.head_type == 'hex' else '内六角')}",
         f"dW {_fmt(bolt.head_bearing_diameter)} · {head_mu}",
-        "头",
+        t("头"),
         "label-head",
     )]
     for side, depth in (("head", 0.0), ("nut", metrics.clamp_length - item.nut_washer_thickness)):
@@ -345,9 +351,9 @@ def _labels(item, metrics, cx, y, half, head_width, nut_width, label_x, top_limi
         if washer:
             entries.append((
                 y(depth + washer.thickness / 2), cx + half(washer.outer_diameter),
-                f"{'头侧' if side == 'head' else '螺母侧'}垫片 · {washer.material_id or '自定义'}",
+                f"{t('头侧垫片' if side == 'head' else '螺母侧垫片')} · {washer.material_id or t('自定义')}",
                 f"di {_fmt(washer.inner_diameter)} · Do {_fmt(washer.outer_diameter)} · t {_fmt(washer.thickness)}",
-                "垫片", f"washer-{side}",
+                t("垫片"), f"washer-{side}",
             ))
     depth = item.head_washer_thickness
     slip_layers = len(layers) - 1 if dsv else len(layers)
@@ -357,7 +363,7 @@ def _labels(item, metrics, cx, y, half, head_width, nut_width, label_x, top_limi
         detail = f"h {_fmt(layer.thickness)} · Rz {_fmt(layer.roughness_rz)}"
         if index < slip_layers:
             detail += f" · μT {_fmt(layer.interface_friction)}"
-        material = layer.material_id or "自定义"
+        material = layer.material_id or t("自定义")
         entries.append((
             y(middle), cx + half(item.joint.outer_diameter),
             f"{layer.name} · {material}", detail, layer.name, f"plate-{index}",
@@ -366,15 +372,15 @@ def _labels(item, metrics, cx, y, half, head_width, nut_width, label_x, top_limi
     if dsv:
         entries.append((
             y(clamp + nut.height / 2), cx + half(nut_width),
-            f"螺母 m {_fmt(nut.height)}", head_mu, "螺母", "label-nut",
+            f"{t('螺母')} m {_fmt(nut.height)}", head_mu, t("螺母"), "label-nut",
         ))
     else:
-        material = tapped.material_id or "自定义"
+        material = tapped.material_id or t("自定义")
         entries.append((
             y(clamp + metrics.engagement_length / 2), cx + half(item.joint.outer_diameter),
-            f"内螺纹件 · {material}",
-            f"旋合 {_fmt(metrics.engagement_length)} · μG {_fmt(bolt.thread_friction)}",
-            "内螺纹", "tapped",
+            f"{t('内螺纹件')} · {material}",
+            f"{t('旋合')} {_fmt(metrics.engagement_length)} · μG {_fmt(bolt.thread_friction)}",
+            t("内螺纹"), "tapped",
         ))
 
     entries.sort(key=lambda entry: entry[0])

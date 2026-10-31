@@ -23,6 +23,7 @@ from vdi2230.domain.general_inputs import (
 )
 from vdi2230.infrastructure.general_report import render_general_report
 from vdi2230.infrastructure.general_section import TEXT_FILL, Shape, section_target
+from vdi2230.i18n import Language, translate
 
 
 DEFAULT_TITLE = "通用螺栓连接"
@@ -370,16 +371,16 @@ class GeneralFormModel:
         item["provenance"] = provenance
         return item
 
-    def calculate(self) -> Outcome:
+    def calculate(self, language: Language = "zh") -> Outcome:
         try:
             result = calculate_general(parse_general_input(self.to_input_json()))
         except InputValidationError as exc:
             return Outcome(
-                error=f"输入有误（{len(exc.errors)} 项），请修正标红字段。",
-                field_errors=tuple(FieldError(error.path, error.message) for error in exc.errors),
+                error=translate(f"输入有误（{len(exc.errors)} 项），请修正标红字段。", language),
+                field_errors=tuple(FieldError(error.path, translate(error.message, language)) for error in exc.errors),
             )
         except (ValueError, ArithmeticError) as exc:
-            return Outcome(error=f"计算无法完成，请检查输入：{exc}")
+            return Outcome(error=translate(f"计算无法完成，请检查输入：{exc}", language))
         self.provisional = {entry.split(" ← ")[0] for entry in result.provisional_sources}
         calculated_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-        return Outcome(result=result, report=render_general_report(result, calculated_at=calculated_at))
+        return Outcome(result=result, report=render_general_report(result, calculated_at=calculated_at, language=language))

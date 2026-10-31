@@ -11,6 +11,7 @@ import logging
 import math
 from typing import Any
 from urllib.parse import parse_qs
+from functools import partial
 
 from vdi2230 import data as engineering_data
 from vdi2230.calculations.general import GeneralCalculationResult, calculate_general
@@ -21,6 +22,7 @@ from vdi2230.domain.general_inputs import (
 )
 from vdi2230.infrastructure.general_report import render_general_report
 from vdi2230.infrastructure.general_section import MAX_VIEW, MIN_VIEW, general_section_shapes, section_target
+from vdi2230.i18n import Language, MESSAGES, TEMPLATES, language_code, source_label, translate
 
 
 LOGGER = logging.getLogger(__name__)
@@ -41,6 +43,10 @@ def _json_safe(value: Any) -> Any:
 
 def schema_payload() -> Response:
     return 200, field_schema_json()
+
+
+def translations_payload() -> Response:
+    return 200, {"messages": MESSAGES, "templates": TEMPLATES}
 
 
 def catalog_payload() -> Response:
@@ -84,45 +90,61 @@ def _view(raw: Any) -> tuple[float, float]:
     return size[0], size[1]
 
 
-def result_json(result: GeneralCalculationResult, width: float, height: float, calculated_at: str) -> dict[str, Any]:
-    shapes = general_section_shapes(result.input, result.metrics, width, height)
+def result_json(result: GeneralCalculationResult, width: float, height: float, calculated_at: str, language: Language = "zh") -> dict[str, Any]:
+    t = partial(translate, language=language)
+    shapes = general_section_shapes(result.input, result.metrics, width, height, language=language)
+    other_language: Language = "en" if language == "zh" else "zh"
+    other_shapes = general_section_shapes(result.input, result.metrics, width, height, language=other_language)
     return _json_safe({
         "input": result.input.to_json(),
         "verdict": result.verdict.value,
-        "verdict_label": result.verdict_label,
+        "language": language,
+        "verdict_label": t(result.verdict_label),
         "checks": [
-            {**asdict(check), "status": check.status.value}
+            {**asdict(check), "status": check.status.value, "status_label": t(check.status.value),
+             "label": t(check.label), "reference": t(check.reference), "note": t(check.note)}
             for check in result.checks
         ],
-        "values": [asdict(value) for value in result.result.values],
-        "warnings": list(result.warnings),
+        "values": [{**asdict(value), "label": t(value.label), "formula_reference": t(value.formula_reference), "note": t(value.note)}
+                   for value in result.result.values],
+        "warnings": [t(warning) for warning in result.warnings],
         "provisional_sources": list(result.provisional_sources),
+        "provisional_labels": [source_label(source, language) for source in result.provisional_sources],
         "metrics": asdict(result.metrics),
         "section": {"width": width, "height": height, "shapes": [
-            {**asdict(shape), "target": section_target(shape.role)} for shape in shapes
+            {**asdict(shape), "target": section_target(shape.role),
+             "text_by_language": {language: shape.text, other_language: other.text}}
+            for shape, other in zip(shapes, other_shapes)
         ]},
         "calculated_at": calculated_at,
-        "report": render_general_report(result, calculated_at=calculated_at),
+        "report": render_general_report(result, calculated_at=calculated_at, language=language),
     })
 
 
 def calculate_payload(body: Any) -> Response:
-    if not isinstance(body, dict) or "input" not in body or set(body) - {"input", "view"}:
-        return 400, {"error": "请求必须包含 input 对象，可选 view。", "field_errors": []}
+    if not isinstance(body, dict):
+        return 400, {"error": "请求必须包含 input 对象，可选 view 和 language。", "field_errors": []}
+    try:
+        language = language_code(body.get("language", "zh"))
+    except ValueError as exc:
+        return 400, {"error": str(exc), "field_errors": []}
+    t = partial(translate, language=language)
+    if "input" not in body or set(body) - {"input", "view", "language"}:
+        return 400, {"error": t("请求必须包含 input 对象，可选 view 和 language。"), "field_errors": []}
     try:
         width, height = _view(body.get("view"))
     except ValueError as exc:
-        return 400, {"error": str(exc), "field_errors": []}
+        return 400, {"error": t(str(exc)), "field_errors": []}
     try:
         item = parse_general_input(body["input"])
         result = calculate_general(item)
     except InputValidationError as exc:
         return 400, {
-            "error": f"输入有误（{len(exc.errors)} 项），请修正标红字段。",
-            "field_errors": [{"path": error.path, "message": error.message} for error in exc.errors],
+            "error": t(f"输入有误（{len(exc.errors)} 项），请修正标红字段。"),
+            "field_errors": [{"path": error.path, "message": t(error.message)} for error in exc.errors],
         }
     except (ValueError, ArithmeticError) as exc:
         LOGGER.warning("General calculation rejected: %s", exc)
-        return 400, {"error": f"计算无法完成，请检查输入：{exc}", "field_errors": []}
+        return 400, {"error": t(f"计算无法完成，请检查输入：{exc}"), "field_errors": []}
     calculated_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-    return 200, result_json(result, width, height, calculated_at)
+    return 200, result_json(result, width, height, calculated_at, language)

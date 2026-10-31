@@ -13,6 +13,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from tkinter import font as tkfont
 from typing import Any, Callable
+from vdi2230.i18n import Language, format_text, language_code, translate
 
 from vdi2230.infrastructure.general_section import (
     DRAWING_BACKGROUND, MAX_VIEW, MIN_VIEW, MUTED_TEXT, PLATE_STROKE, TEXT_FILL, general_section_shapes,
@@ -90,8 +91,9 @@ class ScrollFrame(ttk.Frame):
 
 
 class GeneralWindow:
-    def __init__(self, root: tk.Tk | tk.Toplevel, model: GeneralFormModel | None = None) -> None:
+    def __init__(self, root: tk.Tk | tk.Toplevel, model: GeneralFormModel | None = None, *, language: Language = "zh") -> None:
         self.root = root
+        self.language = language_code(language)
         self.model = model or GeneralFormModel()
         self.outcome: Outcome | None = None
         self._last_good = None
@@ -105,7 +107,7 @@ class GeneralWindow:
         self._sections: list[tuple[ttk.Label, list[str]]] = []
         self._error_paths: list[str] = []
 
-        root.title("VDI 2230 螺栓连接计算 · 通用")
+        root.title(self.t("VDI 2230 螺栓连接计算 · 通用"))
         geometry, min_size = fit_window(root.winfo_screenwidth(), root.winfo_screenheight())
         root.minsize(*min_size)
         root.geometry(geometry)
@@ -117,6 +119,70 @@ class GeneralWindow:
         root.bind_all("<Button-4>", self._on_wheel, add="+")
         root.bind_all("<Button-5>", self._on_wheel, add="+")
         self.calculate_now()
+
+    def t(self, text: str) -> str:
+        return translate(text, self.language)
+
+    def _translate_static(self, widget: tk.Misc) -> None:
+        if isinstance(widget, tk.Widget) and "text" in widget.keys() and not widget.cget("textvariable"):
+            widget.configure(text=self.t(str(widget.cget("text"))))
+        if isinstance(widget, ttk.Notebook):
+            for tab in widget.tabs():
+                widget.tab(tab, text=self.t(widget.tab(tab, "text")))
+        if isinstance(widget, ttk.Treeview):
+            for column in ("#0", *widget.cget("columns")):
+                widget.heading(column, text=self.t(widget.heading(column, "text")))
+        for child in widget.winfo_children():
+            self._translate_static(child)
+
+    def set_language(self, language: Language) -> None:
+        language = language_code(language)
+        if language == self.language:
+            return
+        selected = self.input_tabs.index("current")
+        result_tab = self.result_tabs.index("current")
+        query = self.filter_var.get()
+        scroll = {key: scroller.canvas.yview()[0] for key, scroller in self._scrollers.items()}
+        entered = {path: var.get() for path, var in self._vars.items()
+                   if path not in self._choices and isinstance(var, tk.StringVar)}
+        for job in (self._calc_job, self._draw_job):
+            if job is not None:
+                self.root.after_cancel(job)
+        self._calc_job = self._draw_job = None
+        self.language = language
+        self.root.title(self.t("VDI 2230 螺栓连接计算 · 通用"))
+        self.topbar.destroy()
+        self.panes.destroy()
+        self._vars.clear()
+        self._rows.clear()
+        self._widgets.clear()
+        self._choices.clear()
+        self._sections.clear()
+        self._build()
+        self.input_tabs.select(selected)
+        self.result_tabs.select(result_tab)
+        self.filter_var.set(query)
+        self.apply_visibility()
+        self.render_layers()
+        self._syncing = True
+        try:
+            for path, value in entered.items():
+                if path in self._vars:
+                    self._vars[path].set(value)
+        finally:
+            self._syncing = False
+        self.calculate_now()
+        self.root.update_idletasks()
+        for key, position in scroll.items():
+            self._scrollers[key].canvas.yview_moveto(position)
+
+    def _layer_summary(self, index: int) -> str:
+        values = self.model.layers[index].values
+        return f"{index + 1}. {values.get('name') or self.t('（未命名）')} · {values.get('material_id') or self.t('自定义')} · h {fmt(values.get('thickness'))}"
+
+    def _selection_text(self, index: int) -> str:
+        name = self.model.layers[index].values.get("name") or self.t(f"板层 {index + 1}")
+        return format_text("选中：{name}", self.language, name=f"{index + 1}. {name}")
 
     # ----- layout -----
 
@@ -170,12 +236,17 @@ class GeneralWindow:
 
     def _build(self) -> None:
         top = ttk.Frame(self.root, padding=(8, 6, 8, 2))
+        self.topbar = top
         top.pack(fill=tk.X)
         ttk.Label(top, text="VDI 2230 通用计算", style="Head.TLabel").pack(side=tk.LEFT)
         self.title_var = tk.StringVar(value=self.model.title)
         ttk.Entry(top, textvariable=self.title_var, width=28).pack(side=tk.LEFT, padx=(10, 0))
         self.title_var.trace_add("write", self._on_title)
         ttk.Button(top, text="参考算例 B1–B5", command=self.open_reference).pack(side=tk.RIGHT)
+        self.language_var = tk.StringVar(value="中文" if self.language == "zh" else "English")
+        self.language_selector = ttk.Combobox(top, textvariable=self.language_var, values=("中文", "English"), width=7, state="readonly")
+        self.language_selector.pack(side=tk.RIGHT, padx=4)
+        self.language_selector.bind("<<ComboboxSelected>>", lambda _event: self.set_language("en" if self.language_var.get() == "English" else "zh"))
         self.verdict_label = tk.Label(top, text="—", padx=8, pady=1, background=PANEL, foreground=TEXT_FILL)
         self.verdict_label.pack(side=tk.RIGHT, padx=(0, 10))
         self.status_var = tk.StringVar(value="正在计算…")
@@ -192,6 +263,8 @@ class GeneralWindow:
         self._build_inputs(left)
         self._build_section(center)
         self._build_results(right)
+        self._translate_static(top)
+        self._translate_static(panes)
 
     def _initial_sashes(self, event: tk.Event) -> None:
         if event.width < 600:
@@ -250,10 +323,12 @@ class GeneralWindow:
         self, frame: ttk.Frame, spec: dict[str, Any], path: str, value: Any, on_change: Callable[[str], None],
     ) -> None:
         row = frame.grid_size()[1]
-        label = ttk.Label(frame, text=spec["label"] + (f" {spec['unit']}" if spec["unit"] else ""))
+        label = ttk.Label(frame, text=self.t(spec["label"]) + (f" {spec['unit']}" if spec["unit"] else ""))
         label.grid(row=row, column=0, sticky="w", padx=(0, 6))
+        if self.language == "en":
+            label.bind("<Configure>", lambda _event: label.configure(wraplength=max(60, frame.winfo_width() * 5 // 8 - 30)))
         if spec["kind"] == "choice" or path in CATALOG_PATHS or path.endswith("material_id"):
-            options = self._choice_options(spec, path)
+            options = [(key, self.t(text)) for key, text in self._choice_options(spec, path)]
             to_label = {key: text for key, text in options}
             self._choices[path] = (to_label, {text: key for key, text in options})
             var: tk.Variable = tk.StringVar(value=to_label.get(value, to_label.get(None, "")))
@@ -447,7 +522,7 @@ class GeneralWindow:
         if path == "joint.type" or path.endswith(".mode"):
             self.apply_visibility()
         if message:
-            self.status_var.set(message)
+            self.status_var.set(self.t(message))
         self.schedule_calculation()
 
     def _on_layer_field(self, path: str) -> None:
@@ -460,9 +535,9 @@ class GeneralWindow:
             self._sync(skip=path)
         self._update_marker(path)
         self.layer_list.delete(index)
-        self.layer_list.insert(index, self.model.layer_summary(index))
+        self.layer_list.insert(index, self._layer_summary(index))
         self.layer_list.selection_set(index)
-        self.selected_var.set(f"选中：{index + 1}. {self.model.layer_name(index)}")
+        self.selected_var.set(self._selection_text(index))
         self.schedule_calculation()
 
     def apply_visibility(self) -> None:
@@ -489,7 +564,7 @@ class GeneralWindow:
         model = self.model
         self.layer_list.delete(0, tk.END)
         for index in range(len(model.layers)):
-            self.layer_list.insert(tk.END, model.layer_summary(index))
+            self.layer_list.insert(tk.END, self._layer_summary(index))
         self.layer_list.configure(height=min(max(len(model.layers), 2), 6))
         self.layer_list.selection_clear(0, tk.END)
         self.layer_list.selection_set(model.selected)
@@ -503,7 +578,7 @@ class GeneralWindow:
             (self.layer_buttons["down"], model.selected < len(model.layers) - 1),
         ):
             button.state(["!disabled"] if enabled else ["disabled"])
-        self.selected_var.set(f"选中：{model.selected + 1}. {model.layer_name(model.selected)}")
+        self.selected_var.set(self._selection_text(model.selected))
 
         for path in [path for path in self._vars if _LAYER_PATH.match(path)]:
             del self._vars[path], self._rows[path], self._widgets[path]
@@ -512,7 +587,7 @@ class GeneralWindow:
             child.destroy()
         index = model.selected
         layer = model.layers[index]
-        ttk.Label(self.layer_fields, text=f"板层 {index + 1}", style="Section.TLabel").grid(row=0, column=0, columnspan=3, sticky="w")
+        ttk.Label(self.layer_fields, text=self.t(f"板层 {index + 1}"), style="Section.TLabel").grid(row=0, column=0, columnspan=3, sticky="w")
         for spec in model.layer_fields:
             self._field_row(self.layer_fields, spec, f"plates[{index}].{spec['path']}", layer.values.get(spec["path"]), self._on_layer_field)
         self._highlight_plate()
@@ -555,7 +630,7 @@ class GeneralWindow:
         if self._calc_job is not None:
             self.root.after_cancel(self._calc_job)
             self._calc_job = None
-        outcome = self.model.calculate()
+        outcome = self.model.calculate(self.language)
         self.outcome = outcome
         if outcome.ok:
             self._last_good = outcome.result
@@ -566,7 +641,7 @@ class GeneralWindow:
 
     def _set_verdict(self, text: str, status: str) -> None:
         foreground, background = STATUS_COLORS.get(status, NEUTRAL_COLORS)
-        self.verdict_label.configure(text=text, foreground=foreground, background=background)
+        self.verdict_label.configure(text=self.t(text), foreground=foreground, background=background)
         self.banner.configure(foreground=foreground, background=background)
 
     def _set_tab_errors(self) -> None:
@@ -577,7 +652,7 @@ class GeneralWindow:
             elif path in self.model.specs:
                 flagged.add(self.model.specs[path]["group"])
         for key, label in INPUT_TABS:
-            self.input_tabs.tab(self._tab_index[key], text=f"{label} ✕" if key in flagged else label)
+            self.input_tabs.tab(self._tab_index[key], text=f"{self.t(label)} ✕" if key in flagged else self.t(label))
 
     def _clear_results(self) -> None:
         self.check_tree.delete(*self.check_tree.get_children())
@@ -608,18 +683,18 @@ class GeneralWindow:
             else "计算校核均满足要求，但数据或模型假设待核验，结果不得作为最终结论。" if result.provisional_sources
             else "全部校核满足要求。"
         )
-        self.banner.configure(text=f"总体判定：{result.verdict_label}\n{detail}")
+        self.banner.configure(text=f"{self.t('总体判定')}: {self.t(result.verdict_label)}\n{self.t(detail)}")
 
         self.check_tree.delete(*self.check_tree.get_children())
         for check in result.checks:
             unit = f" {check.unit}" if check.unit else ""
             status = check.status.value
             self.check_tree.insert(
-                "", tk.END, iid=check.symbol, text=f"{check.symbol}  {check.label}",
+                "", tk.END, iid=check.symbol, text=f"{check.symbol}  {self.t(check.label)}",
                 values=(
                     "—" if check.value is None else f"{fmt(check.value)}{unit}",
                     "—" if check.required is None else f"≥ {fmt(check.required)}{unit}",
-                    status,
+                    self.t(status),
                 ),
                 tags=(status if status in STATUS_COLORS else "muted",),
             )
@@ -632,12 +707,12 @@ class GeneralWindow:
         notes = list(result.warnings)
         if result.provisional_sources:
             notes.insert(0, f"待核验数据来源 {len(result.provisional_sources)} 项，详见报告。")
-        self.notes_var.set("\n".join(f"• {note}" for note in notes))
+        self.notes_var.set("\n".join(f"• {self.t(note)}" for note in notes))
         self._set_report(outcome.report)
         for path in self._rows:
             self._update_marker(path)
         self.export_button.state(["!disabled"])
-        self.status_var.set(f"已计算 · {datetime.now():%H:%M:%S}")
+        self.status_var.set(self.t(f"已计算 · {datetime.now():%H:%M:%S}"))
         self._draw()
 
     def _render_failure(self, outcome: Outcome) -> None:
@@ -647,7 +722,7 @@ class GeneralWindow:
         self.banner.configure(text=outcome.error)
         self.error_list.delete(0, tk.END)
         for error in outcome.field_errors:
-            self.error_list.insert(tk.END, f"{self.model.label_for(error.path)}：{error.message}")
+            self.error_list.insert(tk.END, f"{self.t(self.model.label_for(error.path))}: {error.message}")
         if outcome.field_errors:
             self.error_list.configure(height=min(len(outcome.field_errors), 4))
             self.error_list.pack(fill=tk.X, after=self.banner)
@@ -657,7 +732,7 @@ class GeneralWindow:
         for path in self._rows:
             self._update_marker(path)
         self.export_button.state(["disabled"])
-        self.status_var.set("结果未更新")
+        self.status_var.set(self.t("结果未更新"))
         self._draw()
 
     def _fill_values(self) -> None:
@@ -666,10 +741,10 @@ class GeneralWindow:
             return
         query = self.filter_var.get().strip().lower()
         for index, value in enumerate(self.outcome.result.result.values):
-            text = f"{value.symbol} {value.label} {value.unit}".lower()
+            text = f"{value.symbol} {self.t(value.label)} {value.unit}".lower()
             if query and query not in text:
                 continue
-            self.values_tree.insert("", tk.END, iid=f"v{index}", values=(f"{value.symbol}  {value.label}", fmt(value.value), value.unit))
+            self.values_tree.insert("", tk.END, iid=f"v{index}", values=(f"{value.symbol}  {self.t(value.label)}", fmt(value.value), value.unit))
 
     def _on_error_select(self, _event: object = None) -> None:
         selection = self.error_list.curselection()
@@ -710,13 +785,13 @@ class GeneralWindow:
         if self._last_good is None:
             return
         width, height = self._view_size()
-        for shape in general_section_shapes(self._last_good.input, self._last_good.metrics, width, height):
+        for shape in general_section_shapes(self._last_good.input, self._last_good.metrics, width, height, language=self.language):
             kind, coordinates, options = canvas_item(shape)
             getattr(self.canvas, f"create_{kind}")(*coordinates, **options)
         self._highlight_plate()
         if self.outcome is not None and not self.outcome.ok:
             fail_color, fail_background = STATUS_COLORS["不通过"]
-            note = self.canvas.create_text(width / 2, 14, text="剖面未更新：请先修正标红输入", fill=fail_color, tags=("stale",))
+            note = self.canvas.create_text(width / 2, 14, text=self.t("剖面未更新：请先修正标红输入"), fill=fail_color, tags=("stale",))
             x0, y0, x1, y1 = self.canvas.bbox(note)
             self.canvas.tag_lower(
                 self.canvas.create_rectangle(x0 - 8, y0 - 3, x1 + 8, y1 + 3, fill=fail_background, outline=fail_color, tags=("stale",)),
@@ -772,8 +847,8 @@ class GeneralWindow:
         if path is None:
             title = _FILENAME_UNSAFE.sub("_", self.model.title.strip() or "通用螺栓连接")[:60]
             chosen = filedialog.asksaveasfilename(
-                parent=self.root, title="导出计算报告", defaultextension=".txt",
-                initialfile=f"VDI2230-{title}.txt", filetypes=[("文本文件", "*.txt")],
+                parent=self.root, title=self.t("导出计算报告"), defaultextension=".txt",
+                initialfile=f"VDI2230-{title}.txt", filetypes=[(self.t("文本文件"), "*.txt")],
             )
             if not chosen:
                 return None
@@ -782,9 +857,9 @@ class GeneralWindow:
         try:
             target.write_text(self.outcome.report, encoding="utf-8")
         except OSError as exc:
-            messagebox.showerror("导出失败", str(exc), parent=self.root)
+            messagebox.showerror(self.t("导出失败"), str(exc), parent=self.root)
             return None
-        self.status_var.set(f"已导出 {target.name}")
+        self.status_var.set(format_text("已导出 {name}", self.language, name=target.name))
         return target
 
     def close(self) -> None:

@@ -62,6 +62,9 @@ button, input, select { font: inherit; color: inherit; }
   background: var(--input);
   color: var(--text);
 }
+.language-select { flex: none; width: 76px; height: var(--control-h); border: 1px solid var(--line); background: var(--input); border-radius: 2px; }
+html[lang="en"] .project-title { width: 175px; }
+html[lang="en"] .topbar { gap: 6px; }
 .status { margin-left: auto; color: var(--muted); white-space: nowrap; }
 .verdict {
   padding: 2px 8px;

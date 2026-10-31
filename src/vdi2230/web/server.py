@@ -33,6 +33,7 @@ ASSETS = {
     "/": ("index.html", HTML),
     "/app.js": ("app.js", JS),
     "/styles.css": ("styles.css", CSS),
+    "/i18n.js": ("i18n.js", JS),
     "/reference": ("reference.html", HTML),
     "/reference.js": ("reference.js", JS),
     "/reference.css": ("reference.css", CSS),
@@ -40,6 +41,7 @@ ASSETS = {
 GENERAL_GET = {
     "/api/general/schema": general_api.schema_payload,
     "/api/general/catalog": general_api.catalog_payload,
+    "/api/general/translations": general_api.translations_payload,
 }
 
 

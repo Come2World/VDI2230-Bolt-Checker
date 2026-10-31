@@ -130,6 +130,33 @@ true alpha compositing, so the cone uses a **transparent, unfilled dashed
 outline**, not a light-colored opaque substitute. Plate colors and hatching
 remain visible. These rendering choices do not change any calculation.
 
+### Chinese / English
+
+The **中文 / English** selector in the general web and Tk toolbars changes
+the input labels/options, drawing annotations, checks, warnings, field errors
+and TXT report together. The preview and exported UTF-8 TXT use the same
+language. Numerical values, units, provenance and input schema
+`vdi2230.general/3` are unchanged.
+
+Switching retains parameters (including their entered text), plate selection
+and user overrides. Project titles, plate names and user-supplied provenance
+are **not translated**, including names initially supplied by the application.
+Invalid inputs remain invalid: export stays disabled, and the last valid
+drawing remains visibly marked as stale in the selected language.
+
+The web selection is reflected in the URL: open
+<http://127.0.0.1:8765/?lang=en> for English or `?lang=zh` for Chinese.
+Refreshing retains the URL language, **not the design parameters**.
+Tk defaults to Chinese on a new launch; its selector applies to the current
+window. Operating-system file-dialog controls follow the OS language.
+**B1–B5 reference mode is unchanged and does not have this language switch.**
+
+For programmatic general calculations, send `"language": "en"` or `"zh"` next
+to `input` in `POST /api/general/calculate` (default: `zh`).
+Report rendering also accepts `render_general_report(result, language="en")`.
+Unsupported language codes are rejected; translation uses a bundled offline
+catalog, not a network translation service.
+
 On `/reference`, select B1–B5 and click **计算**. The right column shows each available safety
 factor's PDF reference, calculated value and relative error, expandable full
 results and source details, and a TXT preview/download. Switching cases or a
