@@ -58,7 +58,7 @@ def format_result_details(result: CalculationValue) -> str:
 class MainWindow:
     def __init__(
         self,
-        root: tk.Tk,
+        root: tk.Tk | tk.Toplevel,
         cases: tuple[CaseFormDefinition, ...],
     ) -> None:
         if not cases:

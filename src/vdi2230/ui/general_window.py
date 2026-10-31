@@ -1,0 +1,710 @@
+"""Tk desktop front end for the general calculator.
+
+Same three-pane layout as the web UI: tabbed inputs, an interactive 2D
+section (click a plate to edit it) and tabbed results with TXT export.
+All state lives in :class:`GeneralFormModel`; this module only binds widgets.
+"""
+from __future__ import annotations
+
+from datetime import datetime
+from pathlib import Path
+import re
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
+from tkinter import font as tkfont
+from typing import Any, Callable
+
+from vdi2230.infrastructure.general_section import MAX_VIEW, MIN_VIEW, general_section_shapes
+from vdi2230.ui.general_model import (
+    CATALOG_PATHS,
+    INPUT_TABS,
+    KEY_METRICS,
+    GeneralFormModel,
+    Outcome,
+    canvas_item,
+    coerce,
+    entry_text,
+    fmt,
+    plate_index,
+    subsection_of,
+)
+
+
+ACCENT = "#1f6feb"
+STATUS_COLORS = {"通过": ("#1a7f37", "#e6f4ea"), "不通过": ("#c62828", "#fdecea"), "需确认": ("#9a6700", "#fff4d6")}
+NEUTRAL_COLORS = ("#64748b", "#eef1f4")
+MARKERS = {"catalog": ("●", "#1f6feb"), "provisional": ("●", "#d4a017"), "error": ("✕", "#c62828")}
+CALC_DELAY_MS = 300
+PANE_SPLIT = (0.30, 0.68)
+_LAYER_PATH = re.compile(r"^plates\[(\d+)]\.(\w+)$")
+_FILENAME_UNSAFE = re.compile(r'[\\/:*?"<>|\s]+')
+
+
+def _field_columns(frame: tk.Misc) -> None:
+    frame.columnconfigure(0, weight=5, uniform="field")
+    frame.columnconfigure(1, weight=3, uniform="field")
+
+
+class ScrollFrame(ttk.Frame):
+    """Vertically scrollable container; place children in ``body``."""
+
+    def __init__(self, master: tk.Misc) -> None:
+        super().__init__(master)
+        self.canvas = tk.Canvas(self, highlightthickness=0, borderwidth=0)
+        bar = ttk.Scrollbar(self, orient=tk.VERTICAL, command=self.canvas.yview)
+        self.body = ttk.Frame(self.canvas, padding=(4, 2))
+        window = self.canvas.create_window(0, 0, window=self.body, anchor=tk.NW)
+        self.canvas.configure(yscrollcommand=bar.set)
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        bar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.body.bind("<Configure>", lambda _e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
+        self.canvas.bind("<Configure>", lambda e: self.canvas.itemconfigure(window, width=e.width))
+
+    def scroll(self, units: int) -> None:
+        self.canvas.yview_scroll(units, "units")
+
+
+class GeneralWindow:
+    def __init__(self, root: tk.Tk | tk.Toplevel, model: GeneralFormModel | None = None) -> None:
+        self.root = root
+        self.model = model or GeneralFormModel()
+        self.outcome: Outcome | None = None
+        self._last_good = None
+        self._syncing = False
+        self._calc_job: str | None = None
+        self._draw_job: str | None = None
+        self._vars: dict[str, tk.Variable] = {}
+        self._rows: dict[str, tuple[tk.Widget, ...]] = {}
+        self._widgets: dict[str, tk.Widget] = {}
+        self._choices: dict[str, tuple[dict[Any, str], dict[str, Any]]] = {}
+        self._sections: list[tuple[ttk.Label, list[str]]] = []
+        self._error_paths: list[str] = []
+
+        root.title("VDI 2230 螺栓连接计算 · 通用")
+        root.minsize(1100, 640)
+        self._configure_style()
+        self._build()
+        self.apply_visibility()
+        self.render_layers()
+        root.bind_all("<MouseWheel>", self._on_wheel, add="+")
+        root.bind_all("<Button-4>", self._on_wheel, add="+")
+        root.bind_all("<Button-5>", self._on_wheel, add="+")
+        self.calculate_now()
+
+    # ----- layout -----
+
+    def _configure_style(self) -> None:
+        for name in ("TkDefaultFont", "TkTextFont", "TkHeadingFont"):
+            tkfont.nametofont(name, root=self.root).configure(size=12)
+        base = tkfont.nametofont("TkDefaultFont", root=self.root)
+        self._fonts = {
+            "head": tkfont.Font(root=self.root, family=base.actual("family"), size=12, weight="bold"),
+            "section": tkfont.Font(root=self.root, family=base.actual("family"), size=11, weight="bold"),
+        }
+        style = ttk.Style(self.root)
+        style.configure("Treeview", rowheight=20)
+        style.configure("Head.TLabel", font=self._fonts["head"])
+        style.configure("Section.TLabel", foreground="#475569", font=self._fonts["section"])
+        style.configure("Muted.TLabel", foreground="#64748b")
+        style.configure("Unit.TLabel", foreground="#94a3b8")
+
+    def _build(self) -> None:
+        top = ttk.Frame(self.root, padding=(8, 6, 8, 2))
+        top.pack(fill=tk.X)
+        ttk.Label(top, text="VDI 2230 通用计算", style="Head.TLabel").pack(side=tk.LEFT)
+        self.title_var = tk.StringVar(value=self.model.title)
+        ttk.Entry(top, textvariable=self.title_var, width=28).pack(side=tk.LEFT, padx=(10, 0))
+        self.title_var.trace_add("write", self._on_title)
+        ttk.Button(top, text="参考算例 B1–B5", command=self.open_reference).pack(side=tk.RIGHT)
+        self.verdict_label = tk.Label(top, text="—", padx=8, pady=1)
+        self.verdict_label.pack(side=tk.RIGHT, padx=(0, 10))
+        self.status_var = tk.StringVar(value="正在计算…")
+        ttk.Label(top, textvariable=self.status_var, style="Muted.TLabel").pack(side=tk.RIGHT, padx=(0, 10))
+
+        panes = ttk.Panedwindow(self.root, orient=tk.HORIZONTAL)
+        panes.pack(fill=tk.BOTH, expand=True, padx=8, pady=(4, 8))
+        left, center, right = (ttk.Frame(panes, padding=2) for _ in range(3))
+        panes.add(left, weight=3)
+        panes.add(center, weight=4)
+        panes.add(right, weight=3)
+        self.panes = panes
+        panes.bind("<Configure>", self._initial_sashes)
+        self._build_inputs(left)
+        self._build_section(center)
+        self._build_results(right)
+
+    def _initial_sashes(self, event: tk.Event) -> None:
+        if event.width < 600:
+            return
+        self.panes.unbind("<Configure>")
+        self.panes.sashpos(0, int(event.width * PANE_SPLIT[0]))
+        self.panes.sashpos(1, int(event.width * PANE_SPLIT[1]))
+
+    def _build_inputs(self, parent: ttk.Frame) -> None:
+        self.input_tabs = ttk.Notebook(parent)
+        self.input_tabs.pack(fill=tk.BOTH, expand=True)
+        self._tab_index = {key: index for index, (key, _) in enumerate(INPUT_TABS)}
+        bodies: dict[str, ttk.Frame] = {}
+        for key, label in INPUT_TABS:
+            scroller = ScrollFrame(self.input_tabs)
+            self.input_tabs.add(scroller, text=label)
+            bodies[key] = scroller.body
+            _field_columns(scroller.body)
+        # One grid per tab keeps label and entry columns aligned across subsections.
+        sections: dict[str, tuple[ttk.Label, list[str]]] = {}
+        for spec in self.model.fields:
+            if spec["path"] in CATALOG_PATHS:
+                continue
+            body = bodies[spec["group"]]
+            title = subsection_of(spec)
+            key = f"{spec['group']}|{title}"
+            if key not in sections:
+                header = ttk.Label(body, text=title, style="Section.TLabel")
+                header.grid(row=body.grid_size()[1], column=0, columnspan=3, sticky="w", pady=(6, 1))
+                sections[key] = (header, [])
+                self._sections.append(sections[key])
+            paths = sections[key][1]
+            extra = CATALOG_PATHS if spec["path"] == "joint.type" else ()
+            for path in (spec["path"], *extra):
+                self._field_row(body, self.model.specs[path], path, self.model.values.get(path), self._on_field)
+                paths.append(path)
+        self._build_layer_editor(bodies["plates"])
+
+    def _choice_options(self, spec: dict[str, Any], path: str) -> list[tuple[Any, str]]:
+        if path == "bolt.catalog_variant_id":
+            options: list[tuple[Any, str]] = [(None, "自定义（手动输入）")]
+            labels = [bolt["label"] for bolt in self.model.catalog["bolts"]]
+            for bolt in self.model.catalog["bolts"]:
+                label = bolt["label"] if labels.count(bolt["label"]) == 1 else f"{bolt['label']} ({bolt['variant_id']})"
+                options.append((bolt["variant_id"], label))
+            return options
+        if path == "bolt.property_class":
+            return [(None, "—"), *((value, value) for value in self.model.catalog["property_classes"])]
+        if path.endswith("material_id"):
+            return [(None, "自定义"), *((m["material_id"], f"{m['material_id']} · {m['name']}") for m in self.model.catalog["materials"])]
+        return [(value, label) for value, label in spec["choices"]]
+
+    def _field_row(
+        self, frame: ttk.Frame, spec: dict[str, Any], path: str, value: Any, on_change: Callable[[str], None],
+    ) -> None:
+        row = frame.grid_size()[1]
+        label = ttk.Label(frame, text=spec["label"] + (f" {spec['unit']}" if spec["unit"] else ""))
+        label.grid(row=row, column=0, sticky="w", padx=(0, 6))
+        if spec["kind"] == "choice" or path in CATALOG_PATHS or path.endswith("material_id"):
+            options = self._choice_options(spec, path)
+            to_label = {key: text for key, text in options}
+            self._choices[path] = (to_label, {text: key for key, text in options})
+            var: tk.Variable = tk.StringVar(value=to_label.get(value, to_label.get(None, "")))
+            widget: tk.Widget = ttk.Combobox(frame, textvariable=var, values=[text for _, text in options], state="readonly", width=8)
+        elif spec["kind"] == "bool":
+            var = tk.BooleanVar(value=bool(value))
+            widget = ttk.Checkbutton(frame, variable=var)
+        else:
+            var = tk.StringVar(value=entry_text(value))
+            widget = ttk.Entry(frame, textvariable=var, width=8)
+        widget.grid(row=row, column=1, sticky="ew", pady=1)
+        marker = tk.Label(frame, text="", width=2)
+        marker.grid(row=row, column=2, sticky="w")
+        self._vars[path] = var
+        self._rows[path] = (label, widget, marker)
+        self._widgets[path] = widget
+        var.trace_add("write", lambda *_args, p=path: on_change(p))
+        self._update_marker(path)
+
+    def _build_layer_editor(self, body: ttk.Frame) -> None:
+        box = ttk.Frame(body)
+        box.grid(row=body.grid_size()[1], column=0, columnspan=3, sticky="ew", pady=(6, 0))
+        box.columnconfigure(0, weight=1)
+        head = ttk.Frame(box)
+        head.grid(row=0, column=0, sticky="ew")
+        ttk.Label(head, text="板层", style="Section.TLabel").pack(side=tk.LEFT)
+        self.layer_count_var = tk.StringVar()
+        ttk.Label(head, textvariable=self.layer_count_var, style="Muted.TLabel").pack(side=tk.LEFT, padx=4)
+        hint = ttk.Label(
+            box, style="Muted.TLabel", justify=tk.LEFT,
+            text="自螺栓头侧起排列。μT 指该层与下一层（ESV 末层与内螺纹件）之间的界面；μK 用于拧紧侧支承面。",
+        )
+        hint.grid(row=1, column=0, sticky="ew", pady=(2, 2))
+        hint.bind("<Configure>", lambda e: hint.configure(wraplength=max(e.width - 4, 100)))
+        self.layer_list = tk.Listbox(box, height=4, exportselection=False, activestyle="none", selectbackground=ACCENT)
+        self.layer_list.grid(row=2, column=0, sticky="ew")
+        self.layer_list.bind("<<ListboxSelect>>", self._on_layer_list)
+        bar = ttk.Frame(box)
+        bar.grid(row=3, column=0, sticky="ew", pady=(2, 0))
+        self.layer_buttons = {
+            "add": ttk.Button(bar, text="+", command=self.add_layer),
+            "remove": ttk.Button(bar, text="−", command=self.remove_layer),
+            "up": ttk.Button(bar, text="↑", command=lambda: self.move_layer(-1)),
+            "down": ttk.Button(bar, text="↓", command=lambda: self.move_layer(1)),
+        }
+        for column, button in enumerate(self.layer_buttons.values()):
+            bar.columnconfigure(column, weight=1, uniform="layer-buttons")
+            button.grid(row=0, column=column, sticky="ew")
+        self.layer_fields = ttk.Frame(box)
+        self.layer_fields.grid(row=4, column=0, sticky="ew", pady=(4, 0))
+        _field_columns(self.layer_fields)
+
+    def _build_section(self, parent: ttk.Frame) -> None:
+        head = ttk.Frame(parent)
+        head.pack(fill=tk.X)
+        ttk.Label(head, text="二维剖面", style="Head.TLabel").pack(side=tk.LEFT)
+        ttk.Button(head, text="− 删除选中层", command=self.remove_layer).pack(side=tk.RIGHT)
+        self.section_add = ttk.Button(head, text="+ 板层", command=self.add_layer)
+        self.section_add.pack(side=tk.RIGHT, padx=(0, 4))
+        self.selected_var = tk.StringVar()
+        ttk.Label(head, textvariable=self.selected_var, style="Muted.TLabel").pack(side=tk.RIGHT, padx=8)
+        self.canvas = tk.Canvas(parent, background="white", highlightthickness=1, highlightbackground="#d5dbe1")
+        self.canvas.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
+        self.canvas.bind("<Configure>", lambda _e: self._schedule_draw())
+        self.canvas.tag_bind("plate", "<Button-1>", self._on_plate_click)
+        self.canvas.tag_bind("plate", "<Enter>", lambda _e: self.canvas.configure(cursor="hand2"))
+        self.canvas.tag_bind("plate", "<Leave>", lambda _e: self.canvas.configure(cursor=""))
+        self.metrics_var = tk.StringVar()
+        metrics = ttk.Label(parent, textvariable=self.metrics_var, style="Muted.TLabel", justify=tk.LEFT)
+        metrics.pack(fill=tk.X, pady=(3, 0))
+        metrics.bind("<Configure>", lambda e: metrics.configure(wraplength=max(e.width - 4, 100)))
+
+    def _build_results(self, parent: ttk.Frame) -> None:
+        head = ttk.Frame(parent)
+        head.pack(fill=tk.X)
+        ttk.Label(head, text="计算结果", style="Head.TLabel").pack(side=tk.LEFT)
+        self.export_button = ttk.Button(head, text="导出 TXT", command=self.export_report, state=tk.DISABLED)
+        self.export_button.pack(side=tk.RIGHT)
+        self.banner = tk.Label(parent, anchor="w", justify=tk.LEFT, padx=6, pady=4, wraplength=360)
+        self.banner.pack(fill=tk.X, pady=(4, 2))
+        self.error_list = tk.Listbox(parent, height=0, foreground="#c62828", activestyle="none", exportselection=False)
+        self.error_list.bind("<<ListboxSelect>>", self._on_error_select)
+        self.notes_var = tk.StringVar()
+        self.notes = ttk.Label(parent, textvariable=self.notes_var, foreground="#9a6700", wraplength=360, justify=tk.LEFT)
+        self.notes.pack(fill=tk.X)
+        self.result_tabs = ttk.Notebook(parent)
+        self.result_tabs.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
+
+        checks = ttk.Frame(self.result_tabs)
+        self.result_tabs.add(checks, text="安全系数")
+        self.check_tree = ttk.Treeview(checks, columns=("value", "required", "status"), show="tree headings", selectmode="browse")
+        for column, text, width, anchor in (
+            ("#0", "校核项", 170, "w"), ("value", "计算值", 84, "e"), ("required", "要求", 96, "e"), ("status", "状态", 52, "center"),
+        ):
+            self.check_tree.heading(column, text=text)
+            self.check_tree.column(column, width=width, anchor=anchor, stretch=column == "#0")
+        for status, (foreground, _background) in STATUS_COLORS.items():
+            self.check_tree.tag_configure(status, foreground=foreground)
+        self.check_tree.tag_configure("muted", foreground=NEUTRAL_COLORS[0])
+        self.check_tree.pack(fill=tk.BOTH, expand=True)
+
+        values = ttk.Frame(self.result_tabs)
+        self.result_tabs.add(values, text="全部结果")
+        self.filter_var = tk.StringVar()
+        ttk.Entry(values, textvariable=self.filter_var).pack(fill=tk.X, pady=(2, 2))
+        self.filter_var.trace_add("write", lambda *_: self._fill_values())
+        self.values_tree = ttk.Treeview(values, columns=("label", "value", "unit"), show="headings")
+        for column, text, width, anchor in (("label", "名称", 200, "w"), ("value", "数值", 90, "e"), ("unit", "单位", 60, "w")):
+            self.values_tree.heading(column, text=text)
+            self.values_tree.column(column, width=width, anchor=anchor, stretch=column == "label")
+        self.values_tree.pack(fill=tk.BOTH, expand=True)
+
+        report = ttk.Frame(self.result_tabs)
+        self.result_tabs.add(report, text="报告")
+        self.report_text = tk.Text(report, wrap=tk.NONE, font="TkFixedFont", state=tk.DISABLED, borderwidth=0)
+        yscroll = ttk.Scrollbar(report, orient=tk.VERTICAL, command=self.report_text.yview)
+        self.report_text.configure(yscrollcommand=yscroll.set)
+        yscroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.report_text.pack(fill=tk.BOTH, expand=True)
+
+    # ----- value plumbing -----
+
+    def _read(self, path: str, spec: dict[str, Any]) -> Any:
+        raw = self._vars[path].get()
+        if path in self._choices:
+            return self._choices[path][1].get(raw)
+        return coerce(spec, raw)
+
+    def _write(self, path: str, value: Any) -> None:
+        var = self._vars.get(path)
+        if var is None:
+            return
+        if path in self._choices:
+            to_label = self._choices[path][0]
+            var.set(to_label.get(value, to_label.get(None, "")))
+        elif isinstance(var, tk.BooleanVar):
+            var.set(bool(value))
+        else:
+            var.set(entry_text(value))
+
+    def _sync(self, skip: str = "") -> None:
+        """Push model values into widgets without re-triggering change handlers."""
+        self._syncing = True
+        try:
+            for path in self._vars:
+                if path == skip:
+                    continue
+                match = _LAYER_PATH.match(path)
+                if match:
+                    self._write(path, self.model.layers[int(match.group(1))].values.get(match.group(2)))
+                else:
+                    self._write(path, self.model.values.get(path))
+                self._update_marker(path)
+        finally:
+            self._syncing = False
+
+    def _update_marker(self, path: str) -> None:
+        row = self._rows.get(path)
+        if row is None:
+            return
+        marker = row[2]
+        if path in self._error_paths:
+            kind = "error"
+        else:
+            source = self.model.source_for(path)
+            kind = "" if not source or source == "user" else ("provisional" if path in self.model.provisional else "catalog")
+        text, color = MARKERS.get(kind, ("", "black"))
+        marker.configure(text=text, foreground=color)
+
+    def _on_title(self, *_args: object) -> None:
+        self.model.title = self.title_var.get()
+        self.schedule_calculation(500)
+
+    def _on_field(self, path: str) -> None:
+        if self._syncing:
+            return
+        message = self.model.set_value(path, self._read(path, self.model.specs[path]))
+        if path in CATALOG_PATHS or path in ("bolt.length", "tapped.material_id"):
+            self._sync(skip=path)
+        self._update_marker(path)
+        if path == "joint.type" or path.endswith(".mode"):
+            self.apply_visibility()
+        if message:
+            self.status_var.set(message)
+        self.schedule_calculation()
+
+    def _on_layer_field(self, path: str) -> None:
+        if self._syncing:
+            return
+        match = _LAYER_PATH.match(path)
+        index, name = int(match.group(1)), match.group(2)
+        self.model.set_layer_value(index, name, self._read(path, self.model.layer_specs[name]))
+        if name == "material_id":
+            self._sync(skip=path)
+        self._update_marker(path)
+        self.layer_list.delete(index)
+        self.layer_list.insert(index, self.model.layer_summary(index))
+        self.layer_list.selection_set(index)
+        self.selected_var.set(f"选中：{index + 1}. {self.model.layer_name(index)}")
+        self.schedule_calculation()
+
+    def apply_visibility(self) -> None:
+        for path, (label, widget, marker) in self._rows.items():
+            if _LAYER_PATH.match(path):
+                continue
+            for item in (label, widget, marker):
+                if self.model.is_relevant(path):
+                    item.grid()
+                else:
+                    item.grid_remove()
+        for header, paths in self._sections:
+            if any(self.model.is_relevant(path) for path in paths):
+                header.grid()
+            else:
+                header.grid_remove()
+
+    def is_field_visible(self, path: str) -> bool:
+        return bool(self._widgets[path].winfo_manager())
+
+    # ----- layers -----
+
+    def render_layers(self) -> None:
+        model = self.model
+        self.layer_list.delete(0, tk.END)
+        for index in range(len(model.layers)):
+            self.layer_list.insert(tk.END, model.layer_summary(index))
+        self.layer_list.configure(height=min(max(len(model.layers), 2), 6))
+        self.layer_list.selection_clear(0, tk.END)
+        self.layer_list.selection_set(model.selected)
+        self.layer_list.see(model.selected)
+        self.layer_count_var.set(f"{len(model.layers)} / {model.max_layers}")
+        full = len(model.layers) >= model.max_layers
+        for button, enabled in (
+            (self.layer_buttons["add"], not full), (self.section_add, not full),
+            (self.layer_buttons["remove"], len(model.layers) > 1),
+            (self.layer_buttons["up"], model.selected > 0),
+            (self.layer_buttons["down"], model.selected < len(model.layers) - 1),
+        ):
+            button.state(["!disabled"] if enabled else ["disabled"])
+        self.selected_var.set(f"选中：{model.selected + 1}. {model.layer_name(model.selected)}")
+
+        for path in [path for path in self._vars if _LAYER_PATH.match(path)]:
+            del self._vars[path], self._rows[path], self._widgets[path]
+            self._choices.pop(path, None)
+        for child in self.layer_fields.winfo_children():
+            child.destroy()
+        index = model.selected
+        layer = model.layers[index]
+        ttk.Label(self.layer_fields, text=f"板层 {index + 1}", style="Section.TLabel").grid(row=0, column=0, columnspan=3, sticky="w")
+        for spec in model.layer_fields:
+            self._field_row(self.layer_fields, spec, f"plates[{index}].{spec['path']}", layer.values.get(spec["path"]), self._on_layer_field)
+        self._highlight_plate()
+
+    def _on_layer_list(self, _event: object = None) -> None:
+        selection = self.layer_list.curselection()
+        if selection and selection[0] != self.model.selected:
+            self.select_layer(selection[0])
+
+    def select_layer(self, index: int, reveal: bool = False) -> None:
+        self.model.select_layer(index)
+        self.render_layers()
+        if reveal:
+            self.input_tabs.select(self._tab_index["plates"])
+
+    def add_layer(self) -> None:
+        if self.model.add_layer():
+            self.render_layers()
+            self.schedule_calculation(0)
+
+    def remove_layer(self) -> None:
+        if self.model.remove_layer(self.model.selected):
+            self.render_layers()
+            self.schedule_calculation(0)
+
+    def move_layer(self, direction: int) -> None:
+        if self.model.move_layer(self.model.selected, direction):
+            self.render_layers()
+            self.schedule_calculation(0)
+
+    # ----- calculation and results -----
+
+    def schedule_calculation(self, delay: int = CALC_DELAY_MS) -> None:
+        self.export_button.state(["disabled"])
+        if self._calc_job is not None:
+            self.root.after_cancel(self._calc_job)
+        self._calc_job = self.root.after(delay, self.calculate_now)
+
+    def calculate_now(self) -> Outcome:
+        if self._calc_job is not None:
+            self.root.after_cancel(self._calc_job)
+            self._calc_job = None
+        outcome = self.model.calculate()
+        self.outcome = outcome
+        if outcome.ok:
+            self._last_good = outcome.result
+            self._render_success(outcome)
+        else:
+            self._render_failure(outcome)
+        return outcome
+
+    def _set_verdict(self, text: str, status: str) -> None:
+        foreground, background = STATUS_COLORS.get(status, NEUTRAL_COLORS)
+        self.verdict_label.configure(text=text, foreground="white", background=foreground)
+        self.banner.configure(foreground=foreground, background=background)
+
+    def _set_tab_errors(self) -> None:
+        flagged = set()
+        for path in self._error_paths:
+            if _LAYER_PATH.match(path):
+                flagged.add("plates")
+            elif path in self.model.specs:
+                flagged.add(self.model.specs[path]["group"])
+        for key, label in INPUT_TABS:
+            self.input_tabs.tab(self._tab_index[key], text=f"{label} ✕" if key in flagged else label)
+
+    def _clear_results(self) -> None:
+        self.check_tree.delete(*self.check_tree.get_children())
+        self.values_tree.delete(*self.values_tree.get_children())
+        self._set_report("")
+        self.metrics_var.set("")
+        self.notes_var.set("")
+
+    def _set_report(self, text: str) -> None:
+        self.report_text.configure(state=tk.NORMAL)
+        self.report_text.delete("1.0", tk.END)
+        self.report_text.insert("1.0", text)
+        self.report_text.configure(state=tk.DISABLED)
+
+    def report(self) -> str:
+        return self.report_text.get("1.0", "end-1c")
+
+    def _render_success(self, outcome: Outcome) -> None:
+        result = outcome.result
+        assert result is not None
+        self._error_paths = []
+        self.error_list.pack_forget()
+        self._set_tab_errors()
+        self._set_verdict(result.verdict_label, result.verdict.value)
+        failing = [check.symbol for check in result.checks if check.status.value == "不通过"]
+        detail = (
+            f"不通过：{'、'.join(failing)}" if failing
+            else "计算校核均满足要求，但使用了未经核验的目录/表格数据，结果不得作为最终结论。" if result.provisional_sources
+            else "全部校核满足要求。"
+        )
+        self.banner.configure(text=f"总体判定：{result.verdict_label}\n{detail}")
+
+        self.check_tree.delete(*self.check_tree.get_children())
+        for check in result.checks:
+            unit = f" {check.unit}" if check.unit else ""
+            status = check.status.value
+            self.check_tree.insert(
+                "", tk.END, iid=check.symbol, text=f"{check.symbol}  {check.label}",
+                values=(
+                    "—" if check.value is None else f"{fmt(check.value)}{unit}",
+                    "—" if check.required is None else f"≥ {fmt(check.required)}{unit}",
+                    status,
+                ),
+                tags=(status if status in STATUS_COLORS else "muted",),
+            )
+        self._fill_values()
+        by_symbol = {value.symbol: value for value in result.result.values}
+        self.metrics_var.set("    ".join(
+            f"{label} {fmt(by_symbol[symbol].value)}{' ' + by_symbol[symbol].unit if by_symbol[symbol].unit else ''}"
+            for symbol, label in KEY_METRICS if symbol in by_symbol
+        ))
+        notes = list(result.warnings)
+        if result.provisional_sources:
+            notes.insert(0, f"待核验数据来源 {len(result.provisional_sources)} 项，详见报告。")
+        self.notes_var.set("\n".join(f"• {note}" for note in notes))
+        self._set_report(outcome.report)
+        for path in self._rows:
+            self._update_marker(path)
+        self.export_button.state(["!disabled"])
+        self.status_var.set(f"已计算 · {datetime.now():%H:%M:%S}")
+        self._draw()
+
+    def _render_failure(self, outcome: Outcome) -> None:
+        self._clear_results()
+        self._error_paths = [error.path for error in outcome.field_errors]
+        self._set_verdict("输入有误" if outcome.field_errors else "计算失败", "不通过")
+        self.banner.configure(text=outcome.error)
+        self.error_list.delete(0, tk.END)
+        for error in outcome.field_errors:
+            self.error_list.insert(tk.END, f"{self.model.label_for(error.path)}：{error.message}")
+        if outcome.field_errors:
+            self.error_list.configure(height=min(len(outcome.field_errors), 4))
+            self.error_list.pack(fill=tk.X, after=self.banner)
+        else:
+            self.error_list.pack_forget()
+        self._set_tab_errors()
+        for path in self._rows:
+            self._update_marker(path)
+        self.export_button.state(["disabled"])
+        self.status_var.set("结果未更新")
+        self._draw()
+
+    def _fill_values(self) -> None:
+        self.values_tree.delete(*self.values_tree.get_children())
+        if not self.outcome or not self.outcome.ok:
+            return
+        query = self.filter_var.get().strip().lower()
+        for index, value in enumerate(self.outcome.result.result.values):
+            text = f"{value.symbol} {value.label} {value.unit}".lower()
+            if query and query not in text:
+                continue
+            self.values_tree.insert("", tk.END, iid=f"v{index}", values=(f"{value.symbol}  {value.label}", fmt(value.value), value.unit))
+
+    def _on_error_select(self, _event: object = None) -> None:
+        selection = self.error_list.curselection()
+        if selection:
+            self.go_to_field(self._error_paths[selection[0]])
+
+    def go_to_field(self, path: str) -> None:
+        match = _LAYER_PATH.match(path)
+        if match:
+            self.select_layer(int(match.group(1)), reveal=True)
+        elif path in self.model.specs:
+            self.input_tabs.select(self._tab_index[self.model.specs[path]["group"]])
+        widget = self._widgets.get(path)
+        if widget is not None:
+            widget.focus_set()
+
+    # ----- section drawing -----
+
+    def _view_size(self) -> tuple[int, int]:
+        width, height = self.canvas.winfo_width(), self.canvas.winfo_height()
+        if width <= 1 or height <= 1:
+            width, height = 640, 520
+        return min(max(width, MIN_VIEW), MAX_VIEW), min(max(height, MIN_VIEW), MAX_VIEW)
+
+    def _schedule_draw(self) -> None:
+        if self._draw_job is not None:
+            self.root.after_cancel(self._draw_job)
+        self._draw_job = self.root.after(60, self._draw)
+
+    def _draw(self) -> None:
+        self._draw_job = None
+        self.canvas.delete("all")
+        if self._last_good is None:
+            return
+        width, height = self._view_size()
+        for shape in general_section_shapes(self._last_good.input, self._last_good.metrics, width, height):
+            kind, coordinates, options = canvas_item(shape)
+            getattr(self.canvas, f"create_{kind}")(*coordinates, **options)
+        self._highlight_plate()
+        if self.outcome is not None and not self.outcome.ok:
+            note = self.canvas.create_text(width / 2, 14, text="剖面未更新：请先修正标红输入", fill="#c62828", tags=("stale",))
+            x0, y0, x1, y1 = self.canvas.bbox(note)
+            self.canvas.tag_lower(
+                self.canvas.create_rectangle(x0 - 8, y0 - 3, x1 + 8, y1 + 3, fill="#fdecea", outline="#c62828", tags=("stale",)),
+                note,
+            )
+
+    def _highlight_plate(self) -> None:
+        for item in self.canvas.find_withtag("plate"):
+            index = plate_index(self.canvas.gettags(item))
+            if self.canvas.type(item) == "rectangle":
+                selected = index == self.model.selected
+                self.canvas.itemconfigure(item, outline=ACCENT if selected else "#5b7083", width=2 if selected else 1)
+
+    def _on_plate_click(self, _event: object = None) -> None:
+        index = plate_index(self.canvas.gettags("current"))
+        if index is not None and index < len(self.model.layers):
+            self.select_layer(index, reveal=True)
+
+    def _on_wheel(self, event: tk.Event) -> None:
+        try:
+            widget = self.root.winfo_containing(event.x_root, event.y_root)
+        except (KeyError, tk.TclError):
+            return
+        while widget is not None and not isinstance(widget, ScrollFrame):
+            widget = widget.master
+        if widget is None:
+            return
+        if event.num == 4 or getattr(event, "delta", 0) > 0:
+            widget.scroll(-1)
+        else:
+            widget.scroll(1)
+
+    # ----- actions -----
+
+    def export_report(self, path: str | Path | None = None) -> Path | None:
+        if self.outcome is None or not self.outcome.ok:
+            return None
+        if path is None:
+            title = _FILENAME_UNSAFE.sub("_", self.model.title.strip() or "通用螺栓连接")[:60]
+            chosen = filedialog.asksaveasfilename(
+                parent=self.root, title="导出计算报告", defaultextension=".txt",
+                initialfile=f"VDI2230-{title}.txt", filetypes=[("文本文件", "*.txt")],
+            )
+            if not chosen:
+                return None
+            path = chosen
+        target = Path(path)
+        try:
+            target.write_text(self.outcome.report, encoding="utf-8")
+        except OSError as exc:
+            messagebox.showerror("导出失败", str(exc), parent=self.root)
+            return None
+        self.status_var.set(f"已导出 {target.name}")
+        return target
+
+    def close(self) -> None:
+        for job in (self._calc_job, self._draw_job):
+            if job is not None:
+                self.root.after_cancel(job)
+        self._calc_job = self._draw_job = None
+        self.root.destroy()
+
+    def open_reference(self) -> tk.Toplevel:
+        from vdi2230.ui.main_window import MainWindow
+        from vdi2230.ui.reference_cases import build_reference_cases
+
+        window = tk.Toplevel(self.root)
+        MainWindow(window, build_reference_cases())
+        return window

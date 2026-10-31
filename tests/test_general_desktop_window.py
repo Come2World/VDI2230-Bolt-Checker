@@ -1,0 +1,190 @@
+import tempfile
+import tkinter as tk
+import unittest
+from pathlib import Path
+from unittest import mock
+
+from vdi2230 import __main__ as entry
+from vdi2230.ui.general_model import entry_text
+from vdi2230.ui.general_window import ACCENT, GeneralWindow
+
+
+class GeneralWindowTests(unittest.TestCase):
+    def setUp(self):
+        try:
+            self.root = tk.Tk()
+        except tk.TclError as exc:
+            self.skipTest(f"Tk 不可用：{exc}")
+        self.root.withdraw()
+        self.window = GeneralWindow(self.root)
+        self.window.calculate_now()
+
+    def tearDown(self):
+        self.window.close()
+
+    def set_choice(self, path, value):
+        label = self.window._choices[path][0][value]
+        self.window._vars[path].set(label)
+
+    def tab_text(self, key):
+        return self.window.input_tabs.tab(self.window._tab_index[key], "text")
+
+    def test_default_case_renders_checks_section_and_report(self):
+        window = self.window
+        self.assertEqual(window.verdict_label.cget("text"), "需确认 · 数据待核验")
+        self.assertIn("SF", window.check_tree.get_children())
+        self.assertEqual(window.check_tree.set("SF", "status"), "通过")
+        self.assertTrue(window.canvas.find_withtag("plate-0"))
+        self.assertTrue(window.canvas.find_withtag("plate-1"))
+        self.assertFalse(window.canvas.find_withtag("stale"))
+        self.assertIn("lK 40 mm", window.metrics_var.get())
+        self.assertIn("通用螺栓连接", window.report())
+        self.assertTrue(window.values_tree.get_children())
+        self.assertTrue(window.export_button.instate(["!disabled"]))
+
+    def test_values_filter_narrows_the_list(self):
+        window = self.window
+        total = len(window.values_tree.get_children())
+        window.filter_var.set("FMzul")
+        filtered = len(window.values_tree.get_children())
+        self.assertGreater(filtered, 0)
+        self.assertLess(filtered, total)
+
+    def test_adding_a_layer_redraws_the_section(self):
+        window = self.window
+        window.add_layer()
+        self.assertTrue(window.export_button.instate(["disabled"]))
+        outcome = window.calculate_now()
+        self.assertTrue(outcome.ok, outcome.error)
+        self.assertTrue(window.canvas.find_withtag("plate-2"))
+        self.assertEqual(window.layer_list.size(), 3)
+        self.assertEqual(window.selected_var.get(), "选中：2. 板 3")
+        self.assertEqual(window._vars["plates[1].name"].get(), "板 3")
+        self.assertIn("lK 60 mm", window.metrics_var.get())
+
+    def test_layer_buttons_follow_selection(self):
+        window = self.window
+        self.assertTrue(window.layer_buttons["up"].instate(["disabled"]))
+        self.assertTrue(window.layer_buttons["down"].instate(["!disabled"]))
+        window.move_layer(1)
+        self.assertEqual(window.model.selected, 1)
+        self.assertTrue(window.layer_buttons["down"].instate(["disabled"]))
+        window.remove_layer()
+        self.assertEqual(window.layer_list.size(), 1)
+        self.assertTrue(window.layer_buttons["remove"].instate(["disabled"]))
+
+    def test_invalid_input_is_flagged_and_can_be_fixed(self):
+        window = self.window
+        window._vars["plates[0].thickness"].set("abc")
+        outcome = window.calculate_now()
+        self.assertFalse(outcome.ok)
+        self.assertEqual(window.verdict_label.cget("text"), "输入有误")
+        self.assertEqual(window.error_list.size(), 1)
+        self.assertEqual(window.error_list.winfo_manager(), "pack")
+        self.assertIn("板层 1 · 厚度 h", window.error_list.get(0))
+        self.assertTrue(window.export_button.instate(["disabled"]))
+        self.assertIsNone(window.export_report(Path(tempfile.gettempdir()) / "never.txt"))
+        self.assertEqual(self.tab_text("plates"), "板层 ✕")
+        self.assertEqual(window._rows["plates[0].thickness"][2].cget("text"), "✕")
+        self.assertTrue(window.canvas.find_withtag("plate-0"), "last valid section stays visible")
+        self.assertTrue(window.canvas.find_withtag("stale"))
+        self.assertEqual(window.report(), "")
+
+        window.input_tabs.select(window._tab_index["load"])
+        window.error_list.selection_set(0)
+        window._on_error_select()
+        self.assertEqual(window.input_tabs.index("current"), window._tab_index["plates"])
+
+        window._vars["plates[0].thickness"].set("20")
+        self.assertTrue(window.calculate_now().ok)
+        self.assertEqual(self.tab_text("plates"), "板层")
+        self.assertEqual(window.error_list.winfo_manager(), "")
+        self.assertFalse(window.canvas.find_withtag("stale"))
+
+    def test_catalog_variant_fills_geometry(self):
+        window = self.window
+        self.set_choice("bolt.catalog_variant_id", "ISO4014-M16x2.0")
+        self.assertEqual(window._vars["bolt.d"].get(), "16")
+        self.assertEqual(window._vars["bolt.pitch"].get(), "2")
+        self.assertEqual(window._rows["bolt.d"][2].cget("text"), "●")
+        self.assertTrue(window.calculate_now().ok)
+        self.assertIn("M16", window.report())
+
+    def test_user_override_clears_catalog_marker(self):
+        window = self.window
+        window._vars["bolt.head_bearing_diameter"].set("17")
+        self.assertEqual(window.model.values["bolt.head_bearing_diameter"], 17.0)
+        self.assertEqual(window._rows["bolt.head_bearing_diameter"][2].cget("text"), "")
+
+    def test_material_choice_fills_layer_fields(self):
+        window = self.window
+        record = window.model.materials["42CrMo4"]
+        self.set_choice("plates[0].material_id", "42CrMo4")
+        self.assertEqual(window._vars["plates[0].youngs_modulus"].get(), entry_text(record["youngs_modulus"]))
+        self.assertIn("42CrMo4", window.layer_list.get(0))
+
+    def test_esv_switches_visible_fields(self):
+        window = self.window
+        self.assertTrue(window.is_field_visible("nut.height"))
+        self.assertFalse(window.is_field_visible("tapped.youngs_modulus"))
+        self.set_choice("joint.type", "ESV")
+        self.assertFalse(window.is_field_visible("nut.height"))
+        self.assertTrue(window.is_field_visible("tapped.youngs_modulus"))
+        headers = {header.cget("text"): header.winfo_manager() for header, _ in window._sections}
+        self.assertEqual(headers["螺母（DSV）"], "")
+        self.assertEqual(headers["内螺纹件（ESV）"], "grid")
+        self.assertTrue(window.calculate_now().ok)
+
+    def test_layer_selection_highlights_plate_and_reveals_tab(self):
+        window = self.window
+        window.select_layer(1, reveal=True)
+        self.assertEqual(window.input_tabs.index("current"), window._tab_index["plates"])
+        outlines = {
+            tag: window.canvas.itemcget(window.canvas.find_withtag(tag)[0], "outline") for tag in ("plate-0", "plate-1")
+        }
+        self.assertEqual(outlines["plate-1"], ACCENT)
+        self.assertNotEqual(outlines["plate-0"], ACCENT)
+
+    def test_title_change_flows_into_report(self):
+        window = self.window
+        window.title_var.set("法兰连接 A")
+        window.calculate_now()
+        self.assertIn("法兰连接 A", window.report())
+
+    def test_export_writes_the_report(self):
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder) / "report.txt"
+            self.assertEqual(self.window.export_report(target), target)
+            self.assertEqual(target.read_text(encoding="utf-8"), self.window.report())
+        self.assertEqual(self.window.status_var.get(), "已导出 report.txt")
+
+    def test_reference_window_opens_as_toplevel(self):
+        reference = self.window.open_reference()
+        self.assertIsInstance(reference, tk.Toplevel)
+        self.assertIn("VDI", reference.title())
+        reference.destroy()
+
+
+class EntryPointTests(unittest.TestCase):
+    def test_help_exits_cleanly(self):
+        with mock.patch("sys.stdout"), self.assertRaises(SystemExit) as context:
+            entry.main(["--help"])
+        self.assertEqual(context.exception.code, 0)
+
+    def test_default_launches_general_window(self):
+        with mock.patch.object(entry.tk, "Tk") as tk_class, \
+                mock.patch("vdi2230.ui.general_window.GeneralWindow") as window_class:
+            entry.main([])
+        window_class.assert_called_once_with(tk_class.return_value)
+        tk_class.return_value.mainloop.assert_called_once()
+
+    def test_reference_flag_launches_reference_window(self):
+        with mock.patch.object(entry.tk, "Tk") as tk_class, \
+                mock.patch("vdi2230.ui.main_window.MainWindow") as window_class, \
+                mock.patch("vdi2230.ui.reference_cases.build_reference_cases", return_value=["cases"]):
+            entry.main(["--reference"])
+        window_class.assert_called_once_with(tk_class.return_value, ["cases"])
+
+
+if __name__ == "__main__":
+    unittest.main()
