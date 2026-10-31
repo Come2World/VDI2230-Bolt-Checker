@@ -6,7 +6,41 @@ from unittest import mock
 
 from vdi2230 import __main__ as entry
 from vdi2230.ui.general_model import entry_text
-from vdi2230.ui.general_window import ACCENT, GeneralWindow
+from vdi2230.ui.general_window import ACCENT, WINDOW_MIN_SIZE, WINDOW_SIZE, GeneralWindow, fit_window
+
+
+class FitWindowTests(unittest.TestCase):
+    def test_large_screen_uses_default_size_centered(self):
+        geometry, min_size = fit_window(3840, 2160)
+        self.assertEqual(geometry, f"{WINDOW_SIZE[0]}x{WINDOW_SIZE[1]}+1200+433")
+        self.assertEqual(min_size, WINDOW_MIN_SIZE)
+
+    def test_laptop_screen_keeps_window_inside(self):
+        geometry, _ = fit_window(1512, 982)
+        self.assertEqual(geometry, "1440x860+36+40")
+
+    def test_small_screen_shrinks_window_and_min_size(self):
+        geometry, min_size = fit_window(1024, 700)
+        self.assertEqual(geometry, "984x580+20+40")
+        self.assertEqual(min_size, (984, 580))
+
+
+class WindowPlacementTests(unittest.TestCase):
+    def test_window_is_sized_to_the_screen(self):
+        try:
+            root = tk.Tk()
+        except tk.TclError as exc:
+            self.skipTest(f"Tk 不可用：{exc}")
+        root.withdraw()
+        with mock.patch.object(root, "winfo_screenwidth", return_value=1512), \
+                mock.patch.object(root, "winfo_screenheight", return_value=982), \
+                mock.patch.object(root, "geometry") as geometry:
+            window = GeneralWindow(root)
+        try:
+            geometry.assert_called_once_with("1440x860+36+40")
+            self.assertEqual(root.minsize(), WINDOW_MIN_SIZE)
+        finally:
+            window.close()
 
 
 class GeneralWindowTests(unittest.TestCase):

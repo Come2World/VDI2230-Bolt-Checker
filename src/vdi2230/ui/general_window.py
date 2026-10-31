@@ -36,8 +36,26 @@ NEUTRAL_COLORS = ("#64748b", "#eef1f4")
 MARKERS = {"catalog": ("●", "#1f6feb"), "provisional": ("●", "#d4a017"), "error": ("✕", "#c62828")}
 CALC_DELAY_MS = 300
 PANE_SPLIT = (0.30, 0.68)
+WINDOW_SIZE = (1440, 860)
+WINDOW_MIN_SIZE = (1100, 640)
+# Horizontal / vertical room left for screen edges, menu bar and Dock.
+SCREEN_MARGIN = (40, 120)
 _LAYER_PATH = re.compile(r"^plates\[(\d+)]\.(\w+)$")
 _FILENAME_UNSAFE = re.compile(r'[\\/:*?"<>|\s]+')
+
+
+def fit_window(screen_width: int, screen_height: int) -> tuple[str, tuple[int, int]]:
+    """Return a ``WxH+X+Y`` geometry and a min size that both fit on the screen.
+
+    Without an explicit geometry Tk sizes the window to its requested content
+    width, which can exceed laptop screens.
+    """
+    width = max(1, min(WINDOW_SIZE[0], screen_width - SCREEN_MARGIN[0]))
+    height = max(1, min(WINDOW_SIZE[1], screen_height - SCREEN_MARGIN[1]))
+    x = max(0, (screen_width - width) // 2)
+    y = max(0, (screen_height - height) // 3)
+    min_size = (min(WINDOW_MIN_SIZE[0], width), min(WINDOW_MIN_SIZE[1], height))
+    return f"{width}x{height}+{x}+{y}", min_size
 
 
 def _field_columns(frame: tk.Misc) -> None:
@@ -81,7 +99,9 @@ class GeneralWindow:
         self._error_paths: list[str] = []
 
         root.title("VDI 2230 螺栓连接计算 · 通用")
-        root.minsize(1100, 640)
+        geometry, min_size = fit_window(root.winfo_screenwidth(), root.winfo_screenheight())
+        root.minsize(*min_size)
+        root.geometry(geometry)
         self._configure_style()
         self._build()
         self.apply_visibility()
