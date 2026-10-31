@@ -342,6 +342,7 @@ def bolt_catalog_values(
         "joint.hole_diameter": variant.clearance_holes[1],
         "nut.height": variant.nut_height,
         "nut.bearing_diameter": variant.nut_bearing_diameter,
+        "nut.width_across_flats": variant.width_across_flats,
     }
 
 
@@ -361,6 +362,7 @@ CATALOG_GEOMETRY_PATHS = (
     "joint.hole_diameter",
     "nut.height",
     "nut.bearing_diameter",
+    "nut.width_across_flats",
 )
 MATERIAL_FIELDS_BY_TARGET = {
     "plates": ("youngs_modulus", "limiting_surface_pressure"),

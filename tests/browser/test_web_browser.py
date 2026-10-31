@@ -45,7 +45,7 @@ class BrowserUiTests(unittest.TestCase):
         self.page = self.context.new_page()
         self.page_errors: list[str] = []
         self.page.on("pageerror", lambda error: self.page_errors.append(str(error)))
-        self.page.goto(self.base_url)
+        self.page.goto(f"{self.base_url}/reference")
         expect(self.page.get_by_role("button", name="计算", exact=True)).to_be_enabled()
 
     def tearDown(self) -> None:

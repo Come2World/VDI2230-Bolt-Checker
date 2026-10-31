@@ -7,6 +7,7 @@ from importlib.resources import files
 import json
 import logging
 import math
+from typing import Any
 from urllib.parse import urlsplit
 
 from vdi2230.domain.models import JsonValue, ProjectSnapshot
@@ -14,6 +15,7 @@ from vdi2230.domain.section import section_primitives
 from vdi2230.infrastructure.report import render_text_report
 from vdi2230.ui.forms import CaseFormDefinition
 from vdi2230.ui.reference_cases import build_reference_cases
+from vdi2230.web import general_api
 
 
 LOGGER = logging.getLogger(__name__)
@@ -26,10 +28,18 @@ SAFETY_LABELS = {
     "SpK": "螺栓头支承面压安全系数",
     "SpMu": "螺母支承面压安全系数",
 }
+HTML, JS, CSS = "text/html; charset=utf-8", "text/javascript; charset=utf-8", "text/css; charset=utf-8"
 ASSETS = {
-    "/": ("index.html", "text/html; charset=utf-8"),
-    "/app.js": ("app.js", "text/javascript; charset=utf-8"),
-    "/styles.css": ("styles.css", "text/css; charset=utf-8"),
+    "/": ("index.html", HTML),
+    "/app.js": ("app.js", JS),
+    "/styles.css": ("styles.css", CSS),
+    "/reference": ("reference.html", HTML),
+    "/reference.js": ("reference.js", JS),
+    "/reference.css": ("reference.css", CSS),
+}
+GENERAL_GET = {
+    "/api/general/schema": general_api.schema_payload,
+    "/api/general/catalog": general_api.catalog_payload,
 }
 
 
@@ -47,14 +57,19 @@ def reference_project(case: CaseFormDefinition) -> ProjectSnapshot:
     )
 
 
-class ReferenceServer(ThreadingHTTPServer):
+class CalculatorServer(ThreadingHTTPServer):
+    """Local-only server for the general calculator (/) and the B1–B5 verifier (/reference)."""
+
     def __init__(self, port: int = 8765) -> None:
         self.cases = {case.case_id: case for case in build_reference_cases()}
-        super().__init__(("127.0.0.1", port), ReferenceRequestHandler)
+        super().__init__(("127.0.0.1", port), CalculatorRequestHandler)
 
 
-class ReferenceRequestHandler(BaseHTTPRequestHandler):
-    server: ReferenceServer
+ReferenceServer = CalculatorServer
+
+
+class CalculatorRequestHandler(BaseHTTPRequestHandler):
+    server: CalculatorServer
 
     def _send(self, status: int, body: bytes, content_type: str) -> None:
         self.send_response(status)
@@ -98,11 +113,35 @@ class ReferenceRequestHandler(BaseHTTPRequestHandler):
             return self.server.cases.get(parts[2])
         return None
 
+    def _read_json(self) -> tuple[bool, Any]:
+        """Read a bounded JSON body; on failure an error response has already been sent."""
+        if self.headers.get_content_type() != "application/json":
+            self._json(415, {"error": "计算请求必须使用 application/json。"})
+            return False, None
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self._json(400, {"error": "无效的请求长度。"})
+            return False, None
+        if not 0 < length <= MAX_BODY_BYTES:
+            self._json(413, {"error": "请求为空或超过 32 KiB 限制。"})
+            return False, None
+        try:
+            return True, json.loads(self.rfile.read(length))
+        except (ValueError, UnicodeDecodeError):
+            self._json(400, {"error": "请求不是有效的 JSON。"})
+            return False, None
+
     def do_GET(self) -> None:
         if not self._local_request():
             return
-        path = urlsplit(self.path).path
-        if path in ASSETS:
+        url = urlsplit(self.path)
+        path = url.path
+        if path in GENERAL_GET:
+            self._json(*GENERAL_GET[path]())
+        elif path == "/api/general/catalog-values":
+            self._json(*general_api.catalog_values_payload(url.query))
+        elif path in ASSETS:
             name, content_type = ASSETS[path]
             try:
                 body = files("vdi2230.web").joinpath("static", name).read_bytes()
@@ -132,28 +171,30 @@ class ReferenceRequestHandler(BaseHTTPRequestHandler):
                 "section": [asdict(item) for item in section_primitives(640, 500, geometry)],
             })
         else:
-            self._json(404, {"error": "未找到页面或参考算例。"})
+            self._json(404, {"error": "未找到页面或接口。"})
 
     def do_POST(self) -> None:
         if not self._local_request():
             return
-        case = self._case(urlsplit(self.path).path, calculate=True)
+        path = urlsplit(self.path).path
+        if path == "/api/general/calculate":
+            ok, payload = self._read_json()
+            if not ok:
+                return
+            try:
+                self._json(*general_api.calculate_payload(payload))
+            except (TypeError, RuntimeError, KeyError):
+                LOGGER.exception("General calculation failed")
+                self._json(500, {"error": "计算失败，请检查服务日志。", "field_errors": []})
+            return
+        case = self._case(path, calculate=True)
         if case is None:
             self._json(404, {"error": "未找到参考算例。"})
             return
-        if self.headers.get_content_type() != "application/json":
-            self._json(415, {"error": "计算请求必须使用 application/json。"})
+        ok, payload = self._read_json()
+        if not ok:
             return
         try:
-            length = int(self.headers.get("Content-Length", "0"))
-        except ValueError:
-            self._json(400, {"error": "无效的请求长度。"})
-            return
-        if not 0 < length <= MAX_BODY_BYTES:
-            self._json(413, {"error": "请求为空或超过 32 KiB 限制。"})
-            return
-        try:
-            payload = json.loads(self.rfile.read(length))
             if not isinstance(payload, dict) or set(payload) != {"inputs"}:
                 raise ValueError("请求必须只包含 inputs 对象。")
             raw_inputs = payload["inputs"]
@@ -172,7 +213,7 @@ class ReferenceRequestHandler(BaseHTTPRequestHandler):
             if inputs != project.inputs:
                 raise ValueError("仅支持固定 PDF 参考输入；不接受修改后的参数。")
             result = case.calculate(project)
-        except (ValueError, UnicodeDecodeError) as exc:
+        except ValueError as exc:
             LOGGER.warning("Rejected calculation for %s: %s", case.case_id, exc)
             self._json(400, {"error": str(exc)})
             return
@@ -193,18 +234,18 @@ class ReferenceRequestHandler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Local VDI 2230 reference-case web UI")
+    parser = argparse.ArgumentParser(description="Local VDI 2230 calculator web UI")
     parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()
     if not 0 <= args.port <= 65535:
         parser.error("--port must be between 0 and 65535")
     logging.basicConfig(level=logging.INFO)
     try:
-        server = ReferenceServer(args.port)
+        server = CalculatorServer(args.port)
     except OSError as exc:
         parser.exit(1, f"Cannot start local web server: {exc}\n")
     with server:
-        print(f"VDI 2230 web UI: http://127.0.0.1:{server.server_port}", flush=True)
+        print(f"VDI 2230 web UI: http://127.0.0.1:{server.server_port}  (参考算例: /reference)", flush=True)
         try:
             server.serve_forever()
         except KeyboardInterrupt:

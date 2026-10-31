@@ -51,6 +51,9 @@ class WebUiTests(unittest.TestCase):
             ("/", "text/html"),
             ("/app.js", "text/javascript"),
             ("/styles.css", "text/css"),
+            ("/reference", "text/html"),
+            ("/reference.js", "text/javascript"),
+            ("/reference.css", "text/css"),
         ):
             with self.subTest(path=path):
                 status, headers, body = self.http("GET", path)
@@ -59,6 +62,11 @@ class WebUiTests(unittest.TestCase):
                 self.assertEqual(headers["Cache-Control"], "no-store")
                 self.assertIn("frame-ancestors 'none'", headers["Content-Security-Policy"])
                 self.assertTrue(body)
+        pages = {path: self.http("GET", path)[2].decode("utf-8") for path in ("/", "/reference")}
+        self.assertIn('src="/app.js"', pages["/"])
+        self.assertIn('href="/reference"', pages["/"])
+        self.assertIn('src="/reference.js"', pages["/reference"])
+        self.assertIn('href="/"', pages["/reference"])
         status, _, body = self.http("GET", "/api/cases")
         self.assertEqual(status, 200)
         self.assertEqual([case["case_id"] for case in json.loads(body)], list(self.server.cases))

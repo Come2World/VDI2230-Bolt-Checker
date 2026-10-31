@@ -67,6 +67,11 @@ class CatalogLookupTests(unittest.TestCase):
         self.assertEqual(values["bolt.yield_strength"], 940.0)
         self.assertEqual(values["bolt.shear_ratio"], 0.62)
         self.assertEqual(values["joint.hole_diameter"], 13.5)
+        self.assertEqual(values["nut.width_across_flats"], 18.0)
+        self.assertEqual(
+            set(data.catalog_value_sources("ISO4014-M12x1.75", "10.9")),
+            set(values) - {"bolt.head_type"},
+        )
         self.assertEqual(
             data.bolt_catalog_values("ISO4017-M12x1.75", 60, "8.8")["bolt.thread_length"],
             None,
