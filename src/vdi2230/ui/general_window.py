@@ -165,8 +165,10 @@ class GeneralWindow:
         self.input_tabs.pack(fill=tk.BOTH, expand=True)
         self._tab_index = {key: index for index, (key, _) in enumerate(INPUT_TABS)}
         bodies: dict[str, ttk.Frame] = {}
+        self._scrollers: dict[str, ScrollFrame] = {}
         for key, label in INPUT_TABS:
             scroller = ScrollFrame(self.input_tabs)
+            self._scrollers[key] = scroller
             self.input_tabs.add(scroller, text=label)
             bodies[key] = scroller.body
             _field_columns(scroller.body)
@@ -242,7 +244,7 @@ class GeneralWindow:
         ttk.Label(head, textvariable=self.layer_count_var, style="Muted.TLabel").pack(side=tk.LEFT, padx=4)
         hint = ttk.Label(
             box, style="Muted.TLabel", justify=tk.LEFT,
-            text="自螺栓头侧起排列。μT 指该层与下一层（ESV 末层与内螺纹件）之间的界面；μK 用于拧紧侧支承面。",
+            text="自螺栓头侧起排列。μT 指板层传力界面；μK = μG 在螺栓页设置。垫片经验尺寸可改，手动值不会随公称直径覆盖。",
         )
         hint.grid(row=1, column=0, sticky="ew", pady=(2, 2))
         hint.bind("<Configure>", lambda e: hint.configure(wraplength=max(e.width - 4, 100)))
@@ -276,9 +278,9 @@ class GeneralWindow:
         self.canvas = tk.Canvas(parent, background="white", highlightthickness=1, highlightbackground="#d5dbe1")
         self.canvas.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
         self.canvas.bind("<Configure>", lambda _e: self._schedule_draw())
-        self.canvas.tag_bind("plate", "<Button-1>", self._on_plate_click)
-        self.canvas.tag_bind("plate", "<Enter>", lambda _e: self.canvas.configure(cursor="hand2"))
-        self.canvas.tag_bind("plate", "<Leave>", lambda _e: self.canvas.configure(cursor=""))
+        self.canvas.bind("<Button-1>", self._on_section_click)
+        self.canvas.bind("<Motion>", lambda e: self.canvas.configure(cursor="hand2" if self._section_target(e) else ""))
+        self.canvas.bind("<Leave>", lambda _e: self.canvas.configure(cursor=""))
         self.metrics_var = tk.StringVar()
         metrics = ttk.Label(parent, textvariable=self.metrics_var, style="Muted.TLabel", justify=tk.LEFT)
         metrics.pack(fill=tk.X, pady=(3, 0))
@@ -377,7 +379,9 @@ class GeneralWindow:
             kind = "error"
         else:
             source = self.model.source_for(path)
-            kind = "" if not source or source == "user" else ("provisional" if path in self.model.provisional else "catalog")
+            kind = "" if not source or source == "user" else (
+                "provisional" if path in self.model.provisional or source.startswith("default:") else "catalog"
+            )
         text, color = MARKERS.get(kind, ("", "black"))
         marker.configure(text=text, foreground=color)
 
@@ -389,7 +393,7 @@ class GeneralWindow:
         if self._syncing:
             return
         message = self.model.set_value(path, self._read(path, self.model.specs[path]))
-        if path in CATALOG_PATHS or path in ("bolt.length", "tapped.material_id"):
+        if path in CATALOG_PATHS or path in ("bolt.length", "bolt.d") or path.endswith(".material_id"):
             self._sync(skip=path)
         self._update_marker(path)
         if path == "joint.type" or path.endswith(".mode"):
@@ -553,7 +557,7 @@ class GeneralWindow:
         failing = [check.symbol for check in result.checks if check.status.value == "不通过"]
         detail = (
             f"不通过：{'、'.join(failing)}" if failing
-            else "计算校核均满足要求，但使用了未经核验的目录/表格数据，结果不得作为最终结论。" if result.provisional_sources
+            else "计算校核均满足要求，但数据或模型假设待核验，结果不得作为最终结论。" if result.provisional_sources
             else "全部校核满足要求。"
         )
         self.banner.configure(text=f"总体判定：{result.verdict_label}\n{detail}")
@@ -632,6 +636,11 @@ class GeneralWindow:
             self.input_tabs.select(self._tab_index[self.model.specs[path]["group"]])
         widget = self._widgets.get(path)
         if widget is not None:
+            group = "plates" if match else self.model.specs[path]["group"]
+            self.root.update_idletasks()
+            scroller = self._scrollers[group]
+            top = widget.winfo_rooty() - scroller.body.winfo_rooty()
+            scroller.canvas.yview_moveto(max(0, top - 32) / max(1, scroller.body.winfo_height()))
             widget.focus_set()
 
     # ----- section drawing -----
@@ -676,6 +685,21 @@ class GeneralWindow:
         index = plate_index(self.canvas.gettags("current"))
         if index is not None and index < len(self.model.layers):
             self.select_layer(index, reveal=True)
+
+    def _section_target(self, event: tk.Event) -> str:
+        for item in reversed(self.canvas.find_overlapping(event.x - 1, event.y - 1, event.x + 1, event.y + 1)):
+            for tag in self.canvas.gettags(item):
+                if tag.startswith("target:"):
+                    return tag.removeprefix("target:")
+        return ""
+
+    def _on_section_click(self, event: tk.Event) -> None:
+        target = self._section_target(event)
+        match = _LAYER_PATH.match(target)
+        if match and int(match.group(1)) >= len(self.model.layers):
+            return
+        if target:
+            self.go_to_field(target)
 
     def _on_wheel(self, event: tk.Event) -> None:
         try:

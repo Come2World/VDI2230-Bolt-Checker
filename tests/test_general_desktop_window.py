@@ -2,6 +2,7 @@ import tempfile
 import tkinter as tk
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from vdi2230 import __main__ as entry
@@ -168,6 +169,82 @@ class GeneralWindowTests(unittest.TestCase):
         self.assertEqual(headers["螺母（DSV）"], "")
         self.assertEqual(headers["内螺纹件（ESV）"], "grid")
         self.assertTrue(window.calculate_now().ok)
+
+    def test_washers_update_geometry_and_keep_manual_values(self):
+        window = self.window
+        for side in ("head", "nut"):
+            window._vars[f"{side}_washer.enabled"].set(True)
+        self.assertTrue(window.calculate_now().ok)
+        self.assertIn("lK 43.84 mm", window.metrics_var.get())
+        self.assertTrue(window.canvas.find_withtag("washer-head"))
+        self.assertTrue(window.canvas.find_withtag("washer-nut"))
+        window._vars["head_washer.thickness"].set("3")
+        self.set_choice("bolt.catalog_variant_id", "ISO4014-M16x2.0")
+        self.assertEqual(window._vars["head_washer.thickness"].get(), "3")
+        self.assertEqual(window._vars["head_washer.inner_diameter"].get(), "17.6")
+        self.assertTrue(window.calculate_now().ok)
+        self.assertIn("lK 45.56 mm", window.metrics_var.get())
+        self.set_choice("joint.type", "ESV")
+        self.assertFalse(window.is_field_visible("nut_washer.enabled"))
+        self.assertTrue(window.calculate_now().ok)
+        self.assertFalse(window.canvas.find_withtag("washer-nut"))
+
+    def test_native_part_hit_testing_reveals_corresponding_pages(self):
+        window = self.window
+        window._vars["head_washer.enabled"].set(True)
+        window._vars["nut_washer.enabled"].set(True)
+        window.calculate_now()
+        for role, group in (("bolt-head", "bolt"), ("bolt-shank", "bolt"), ("nut", "bolt"),
+                            ("washer-head", "plates"), ("washer-nut", "plates"), ("plate-1", "plates")):
+            with self.subTest(role=role):
+                window.input_tabs.select(window._tab_index["load"])
+                shape = next(item for item in window.canvas.find_withtag(role)
+                             if window.canvas.type(item) in ("rectangle", "polygon"))
+                x0, y0, x1, y1 = window.canvas.bbox(shape)
+                event = SimpleNamespace(x=(x0 + x1) / 2, y=(y0 + y1) / 2)
+                self.assertTrue(window._section_target(event))
+                window._on_section_click(event)
+                self.assertEqual(window.input_tabs.index("current"), window._tab_index[group])
+        self.assertEqual(window.model.selected, 1)
+
+    def test_real_canvas_click_event_reveals_washer_and_bolt_fields(self):
+        window = self.window
+        self.root.deiconify()
+        self.root.geometry("1280x720+40+80")
+        window._vars["head_washer.enabled"].set(True)
+        self.root.update()
+        window.calculate_now()
+        self.root.update()
+        for role, group, field in (("washer-head", "plates", "head_washer.thickness"),
+                                   ("bolt-head", "bolt", "bolt.head_height"),
+                                   ("nut", "bolt", "nut.height")):
+            window.input_tabs.select(window._tab_index["load"])
+            self.root.update()
+            shape = window.canvas.find_withtag(role)[0]
+            x0, y0, x1, y1 = window.canvas.bbox(shape)
+            window.canvas.event_generate("<Button-1>", x=round((x0 + x1) / 2), y=round((y0 + y1) / 2))
+            self.root.update()
+            self.assertEqual(window.input_tabs.index("current"), window._tab_index[group])
+            widget = window._widgets[field]
+            scroller = window._scrollers[group]
+            top = widget.winfo_rooty() - scroller.canvas.winfo_rooty()
+            self.assertGreaterEqual(top, 0)
+            self.assertLess(top + widget.winfo_height(), scroller.canvas.winfo_height())
+
+    def test_washer_errors_point_to_plate_page_and_bolt_friction_is_shared(self):
+        window = self.window
+        window._vars["head_washer.enabled"].set(True)
+        window._vars["head_washer.inner_diameter"].set("20")
+        self.assertFalse(window.calculate_now().ok)
+        self.assertIn("头侧垫片", window.error_list.get(0))
+        window.go_to_field("head_washer.inner_diameter")
+        self.assertEqual(window.input_tabs.index("current"), window._tab_index["plates"])
+        window._vars["head_washer.inner_diameter"].set("13.2")
+        window._vars["bolt.thread_friction"].set("0.18")
+        outcome = window.calculate_now()
+        self.assertTrue(outcome.ok)
+        self.assertEqual(outcome.result.value("μK"), 0.18)
+        self.assertNotIn("plates[0].bearing_friction", window._vars)
 
     def test_layer_selection_highlights_plate_and_reveals_tab(self):
         window = self.window

@@ -41,6 +41,11 @@ def _field_value(spec: FieldSpec, value: object) -> str:
 
 
 def _relevant(item: GeneralInput, path: str) -> bool:
+    if path.startswith(("head_washer.", "nut_washer.")):
+        section, name = path.split(".")
+        if section == "nut_washer" and not item.is_through_bolt:
+            return False
+        return name == "enabled" or getattr(item, section).enabled
     if path.startswith("nut."):
         return item.is_through_bolt
     if path.startswith("tapped."):
@@ -85,7 +90,7 @@ def render_general_report(
         f"总体判定：{result.verdict_label}",
     ]
     if result.provisional_sources:
-        lines.append("注意：数据待核验——使用了未经核验的目录/表格数据，结果不得作为最终结论。")
+        lines.append("注意：数据待核验——使用了未经核验的数据或模型假设，结果不得作为最终结论。")
 
     lines += ["", "一、安全系数与校核", THIN_RULE]
     lines.append(f"{'符号':<8}{'校核项':<22}{'计算值':>14}{'要求值':>12}  状态")
@@ -104,9 +109,10 @@ def render_general_report(
                 continue
             value = _input_value(item, spec.path)
             unit = f" {spec.unit}" if spec.unit and value is not None else ""
-            lines.append(f"  {spec.label} = {_field_value(spec, value)}{unit}{_source(item, spec.path)}")
+            prefix = {"head_washer": "头侧垫片 · ", "nut_washer": "螺母侧垫片 · "}.get(spec.path.split(".")[0], "")
+            lines.append(f"  {prefix}{spec.label} = {_field_value(spec, value)}{unit}{_source(item, spec.path)}")
         if group == "plates":
-            lines.append(f"  板层（自螺栓头侧起，共 {len(item.plates)} 层，lK = {_number(item.clamp_length)} mm）：")
+            lines.append(f"  板层（自螺栓头侧起，共 {len(item.plates)} 层，Σh = {_number(item.plate_length)} mm；含垫片 lK = {_number(item.clamp_length)} mm）：")
             for index, layer in enumerate(item.plates):
                 parts = []
                 for spec in LAYER_SPECS:
@@ -141,6 +147,10 @@ def render_general_report(
         "- 适用范围：同心单螺栓，轴向载荷 + 横向载荷/扭矩；不含偏心、弯曲、温度影响和螺栓组分配。",
         "- R10 工作面压取 FVmax = FMzul − FZ；DSV 采用 w = 1，两侧锥体起始直径分别取螺栓头与螺母 dW。",
         "- R11 公差按 ISO 965-1 6g/6H 公式近似；断裂力取 Rm,max·A0（A0 = min(AS, AT)）。",
+        "- 假设 μK = μG，统一在螺栓输入；垫片不随拧紧件转动，力矩使用紧固件/垫片接触环面，不使用垫片外径代替 dW。",
+        "- 平垫片初始尺寸：di = 1.1d、Do = 2d、t = 0.16d；仅为经验估计，不代表 ISO 标准尺寸。",
+        "- 垫片有效环面：Deff = min(dW, Do, DA)，di,eff = max(di, dh, dha)；δW = t/(EW·Aeff)。不计载荷扩散；邻接板层按较大的 di/dh 孔径保守积分，锥长度不含垫片。",
+        "- Sp,K / Sp,M 取对应板层与垫片校核的最小值；垫片分别检查两接触面。嵌入界面数覆盖包含垫片/板层界面；手动 fZ 必须自行包含垫片影响。",
     ]
     lines += ["", DISCLAIMER, ""]
     return "\n".join(lines)

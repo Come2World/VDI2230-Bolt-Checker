@@ -68,7 +68,7 @@ class CanvasItemTests(unittest.TestCase):
     def test_plate_rectangle_gets_selectable_tags(self):
         kind, points, options = canvas_item(Shape("rect", (1, 2, 3, 4), fill="#dde", stroke="#333", role="plate-2"))
         self.assertEqual((kind, points), ("rectangle", (1, 2, 3, 4)))
-        self.assertEqual(options["tags"], ("plate-2", "plate"))
+        self.assertEqual(options["tags"], ("plate-2", "plate", "interactive", "target:plates[2].thickness"))
         self.assertEqual(plate_index(options["tags"]), 2)
         self.assertIsNone(plate_index(("bolt",)))
 

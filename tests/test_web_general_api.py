@@ -32,7 +32,9 @@ class GeneralApiFunctionTests(unittest.TestCase):
         paths = {field["path"] for field in payload["fields"]}
         self.assertTrue({"bolt.d", "bolt.thread_friction", "load.axial_max", "assembly.utilization"} <= paths)
         layer_paths = {field["path"] for field in payload["layer_fields"]}
-        self.assertTrue({"thickness", "roughness_rz", "interface_friction", "bearing_friction"} <= layer_paths)
+        self.assertTrue({"thickness", "roughness_rz", "interface_friction"} <= layer_paths)
+        self.assertNotIn("bearing_friction", layer_paths)
+        self.assertTrue({"head_washer.enabled", "nut_washer.thickness"} <= paths)
         self.assertGreaterEqual(len(payload["defaults"]["plates"]), 1)
 
     def test_catalog_lists_bolts_materials_and_friction_classes(self) -> None:

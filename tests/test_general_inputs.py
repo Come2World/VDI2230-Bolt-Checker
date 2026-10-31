@@ -151,10 +151,12 @@ class GeneralSchemaTests(unittest.TestCase):
 
     def test_layer_fields_own_plate_properties(self) -> None:
         names = {spec.name for spec in LAYER_SPECS}
-        self.assertTrue({"thickness", "roughness_rz", "interface_friction", "bearing_friction", "material_id"} <= names)
+        self.assertTrue({"thickness", "roughness_rz", "interface_friction", "material_id"} <= names)
+        self.assertNotIn("bearing_friction", names)
         bolt_paths = {spec.path for spec in FIELD_SPECS if spec.path.startswith("bolt.")}
         self.assertIn("bolt.thread_friction", bolt_paths)
-        self.assertFalse(any("bearing_friction" in path for path in bolt_paths))
+        item = parse_general_input(default_input_json())
+        self.assertEqual(item.bolt.bearing_friction, item.bolt.thread_friction)
 
 
 class ProvenanceTests(unittest.TestCase):

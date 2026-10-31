@@ -20,11 +20,21 @@ not replace the standard, engineering judgment, or design review.
 
 ### Ownership of inputs
 
-Thread friction μG belongs to the bolt. Thickness, material, roughness Rz,
-interface friction μT and bearing friction μK belong to each plate layer,
+Thread friction μG and bearing friction μK belong to the bolt: **μK = μG**
+is enforced through one editable value. Thickness, material, roughness Rz and
+interface friction μT belong to each plate layer,
 ordered from the bolt head. Bolt data are chosen from the hex-bolt catalog
 (ISO 4014/4017, M6–M30, 8.8/10.9/12.9) first; any catalog value can be
 overridden, and the override is kept when the bolt length changes.
+
+Optional head-side and nut-side **plain washers** are edited on the **板层**
+tab. Nut-side washers apply only to DSV; their settings are retained but not
+used when switching to ESV. Both washers are off by default. Initial dimensions
+are empirical, not ISO catalog data: **di = 1.1d, Do = 2d, t = 0.16d** (mm;
+M12: 13.2 / 24 / 1.92). Unmodified estimates follow nominal-diameter changes;
+manual overrides remain unchanged. Material, modulus, limiting surface pressure
+and roughness are also editable. S355J0 is only a provisional starting material,
+not a claim about the grade of any purchased washer.
 
 ### General-model assumptions
 
@@ -33,10 +43,30 @@ overridden, and the override is kept when the bolt length changes.
   nut bearing diameter on the nut side.
 - The R11 shear area uses A0 = min(AS, AT) minus the bore.
 - ISO 965 thread tolerances for the engagement check are approximated.
+- Washers use a **conservative plain-washer model**, not a spring/Belleville
+  model. Grip length includes their thickness; washer annular compression
+  compliance is added in series with the plate compliance. Plate cones use
+  only the plate-stack length. No load spreading across the washer is assumed:
+  `Deff = min(dW, Do, DA)`, `di,eff = max(di, dh, dha)`,
+  `Aeff = π/4(Deff² − di,eff²)`, `δW = t/(EW·Aeff)`.
+  Adjacent plate compliance uses the larger of its hole and washer bore.
+- Both washer contact faces are checked; Sp,K / Sp,M report the minimum of
+  the washer and adjacent plate safety factors (components appear in the full
+  results). Washer interfaces contribute to table-based embedding, not to the
+  user-specified slip-interface count. Manual fZ or interface-count overrides
+  must include washer effects.
+- Torque uses the rotating head/nut-to-washer contact annulus, not the full
+  washer OD, and assumes the washer stays stationary. Washer bending and actual
+  contact/load distribution are unverified; enabled washers retain a
+  **需确认** model flag even when all geometry is manually entered.
 
 Regression against the source (same inputs as B1–B3): B1 SF +0.45 %,
 Sp −0.18 %, MA +0.88 %; B2 SG +0.32 %, Sp −0.28 %, SA 0.00 %, MA +0.56 %;
-B3 SG/Sp/FMzul/MA 0.00 %. The B1 Φ difference comes from the source mixing
+B3 SG/Sp/FMzul 0.00 %. **B3 MA is now +8.63 %** (566.100 vs. 521.135 N·m):
+the new μK = μG = 0.12 assumption differs from the example's μK = 0.10.
+This intentional torque change is tested separately, not represented as a
+safety-factor regression failure. The fixed reference verifier is unchanged.
+The B1 Φ difference comes from the source mixing
 w = 1 geometry with δPzu = δM; B3 R11 in the source uses FMzul and 1.2·P.
 
 ## Run from the repository root
@@ -75,8 +105,13 @@ controls; fits 1280×720 without page scrolling; stacks below 1080 px width):
 - **Left** – inputs in four tabs (螺栓 / 板层 / 载荷 / 装配). Catalog and
   material values are marked (blue = catalog, amber = provisional source);
   irrelevant fields (nut vs. tapped part, table vs. manual modes) are hidden.
-- **Center** – SVG section with lK, l, b, DA and the deformation cone. Click a
-  plate to edit it; **+ 板层** inserts a copy below the selected layer.
+- **Center** – engineering-style SVG section: chamfered hex-head/nut profiles
+  with curved face projections, unhatched bolt, fine thread-root lines,
+  alternating plate/washer hatching, centerline and arrow dimensions
+  (d, layer thickness, lK, l, DA). Click a bolt, nut, washer or plate to activate
+  its input tab, reveal the relevant section and focus its field. The same
+  interaction is available on the Tk canvas. **+ 板层** inserts a copy below the
+  selected layer. The drawing remains schematic, not manufacturing-ready.
 - **Right** – verdict, safety-factor table, filterable full results and the
   text report with **导出 TXT**.
 
@@ -116,7 +151,8 @@ On Windows, activate with `.venv\Scripts\Activate.ps1`; after the editable
 installation, run the same `python -m unittest ...` commands without `PYTHONPATH`.
 Browser tests start their own local server on an available port, launch Chromium,
 and clean up both. For the general page they cover the single-viewport layout,
-catalog selection, layer add/select via the section, field errors, stale
+catalog selection, washer estimates/overrides, part clicks and field focus,
+shared bolt friction, layer add/select via the section, field errors, stale
 responses and TXT export; for `/reference` they cover all five cases and 12
 safety-factor comparisons, read-only inputs, result invalidation, error/retry,
 out-of-order responses, UTF-8 report downloads, and desktop/narrow layouts.
@@ -131,6 +167,8 @@ In VS Code, select the environment with the test extra installed, then use
   field rows `.field[data-path="bolt.length"]` (layer fields:
   `.field[data-path="plates[0].thickness"]`), `#layers`, `#add-layer`,
   `#section rect[data-role="plate-0"]`, `#key-metrics`,
+  `#section rect[data-role="washer-head"]`, `#section polygon[data-role="nut"]`,
+  `.field[data-path="head_washer.enabled"]`,
   `#checks-table tr[data-symbol="SF"]`, `#values-table`, `#report-preview`,
   `#export`, `#error`.
 - Reference page: the labels `计算实例`, `计算`, `导出 TXT`, and `#section`,
@@ -140,3 +178,9 @@ The general API (`GET /api/general/schema`, `GET /api/general/catalog`,
 `GET /api/general/catalog-values?variant=…&length=…&class=…`,
 `POST /api/general/calculate`) returns field-level errors as
 `{"field_errors": [{"path", "message"}]}`.
+The input schema is now `vdi2230.general/2`, adding `head_washer` and
+`nut_washer` objects and removing `plates[].bearing_friction`. Only
+`bolt.thread_friction` is submitted; μK is derived. Version 1 and legacy
+bearing-friction fields are explicitly rejected to prevent silent changes to
+old calculations. Restart running Python processes and reload the web page
+after updating.

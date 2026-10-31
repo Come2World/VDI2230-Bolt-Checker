@@ -12,8 +12,10 @@ const BOLT_MATERIAL = new Set([
 const MATERIAL_FIELDS = {
   plates: ["youngs_modulus", "limiting_surface_pressure"],
   tapped: ["youngs_modulus", "tensile_strength", "shear_strength"],
+  head_washer: ["youngs_modulus", "limiting_surface_pressure"],
+  nut_washer: ["youngs_modulus", "limiting_surface_pressure"],
 };
-const COLLAPSED = new Set(["高级选项"]);
+const COLLAPSED = new Set(["高级选项", "头侧垫片", "螺母侧垫片（DSV）"]);
 const KEY_METRICS = [
   ["lK", "lK"], ["Φn", "Φn"], ["FMzul", "FMzul"], ["FSmax", "FS,max"], ["FKRmin", "FKR,min"], ["MA", "MA"],
 ];
@@ -136,8 +138,9 @@ function updateSource(path) {
   marker.className = "src";
   marker.removeAttribute("title");
   if (source && source !== "user") {
-    marker.classList.add(state.provisional.has(path) ? "provisional" : "catalog");
-    marker.title = state.provisional.has(path) ? `${source}（数据待核验）` : source;
+    const provisional = state.provisional.has(path) || source.startsWith("default:");
+    marker.classList.add(provisional ? "provisional" : "catalog");
+    marker.title = provisional ? `${source}（数据待核验）` : source;
   }
 }
 
@@ -162,7 +165,7 @@ function subsectionOf(spec) {
     if (section === "bolt") return BOLT_MATERIAL.has(spec.path) ? "螺栓材料与摩擦" : "螺栓几何";
     return section === "nut" ? "螺母（DSV）" : "内螺纹件（ESV）";
   }
-  if (spec.group === "plates") return "孔与外径";
+  if (spec.group === "plates") return { head_washer: "头侧垫片", nut_washer: "螺母侧垫片（DSV）" }[section] || "孔与外径";
   if (spec.group === "load") return section === "load_introduction" ? "载荷导入系数 n" : "外载荷";
   return { assembly: "拧紧", embedding: "嵌入", advanced: "高级选项", requirements: "安全系数要求" }[section] || section;
 }
@@ -182,8 +185,8 @@ function renderForm() {
       sections.set(key, details);
     }
     let row;
-    if (spec.path === "tapped.material_id") {
-      row = fieldRow(spec, spec.path, state.values[spec.path], (value) => onTappedMaterial(value), materialOptions());
+    if (spec.path.endsWith(".material_id")) {
+      row = fieldRow(spec, spec.path, state.values[spec.path], (value) => onPartMaterial(spec.path.split(".")[0], value), materialOptions());
     } else {
       row = fieldRow(spec, spec.path, state.values[spec.path], (value) => onFieldChange(spec.path, value));
     }
@@ -223,7 +226,7 @@ function catalogRows() {
 
 function relevant(path) {
   const values = state.values;
-  if (path.startsWith("nut.")) return values["joint.type"] === "DSV";
+  if (path.startsWith("nut.") || path.startsWith("nut_washer.")) return values["joint.type"] === "DSV";
   if (path.startsWith("tapped.")) return values["joint.type"] === "ESV";
   if (path === "load_introduction.n") return values["load_introduction.mode"] === "manual";
   if (["load_introduction.joint_class", "load_introduction.la_over_h", "load_introduction.ak_over_h"].includes(path)) {
@@ -258,6 +261,7 @@ function onFieldChange(path, value) {
   delete state.prov[path];
   updateSource(path);
   if (path === "joint.type" || path.endsWith(".mode")) applyVisibility();
+  if (path === "bolt.d") refreshWasherEstimates();
   if (path === "bolt.length" && state.values["bolt.catalog_variant_id"]) {
     loadCatalog(false);
     return;
@@ -265,18 +269,29 @@ function onFieldChange(path, value) {
   scheduleCalculation();
 }
 
-function onTappedMaterial(id) {
-  state.values["tapped.material_id"] = id;
+function onPartMaterial(section, id) {
+  state.values[`${section}.material_id`] = id;
   const record = materialRecord(id);
   if (record) {
-    for (const name of MATERIAL_FIELDS.tapped) {
-      const path = `tapped.${name}`;
+    for (const name of MATERIAL_FIELDS[section]) {
+      const path = `${section}.${name}`;
       state.values[path] = record[name];
       state.prov[path] = `material:${id}`;
       syncControl(path);
     }
   }
   scheduleCalculation();
+}
+
+function refreshWasherEstimates() {
+  const diameter = state.values["bolt.d"];
+  if (typeof diameter !== "number" || !Number.isFinite(diameter) || diameter <= 0) return;
+  for (const spec of state.schema.fields) {
+    if (spec.diameter_factor !== null && state.prov[spec.path] === state.schema.washer_estimate_source) {
+      state.values[spec.path] = Number((diameter * spec.diameter_factor).toFixed(6));
+      syncControl(spec.path);
+    }
+  }
 }
 
 async function loadCatalog(force) {
@@ -300,6 +315,7 @@ async function loadCatalog(force) {
       if (source) state.prov[path] = source;
       syncControl(path);
     }
+    refreshWasherEstimates();
     applyVisibility();
   } catch (error) {
     if (seq !== state.catalogSeq) return;
@@ -535,7 +551,9 @@ function fail(message, fieldErrors) {
 function labelForPath(path) {
   const layer = /^plates\[(\d+)]\.(\w+)$/.exec(path);
   if (layer) return `板层 ${Number(layer[1]) + 1} · ${state.layerSpecs.get(layer[2])?.label || layer[2]}`;
-  return state.specs.get(path)?.label || path || "输入";
+  const spec = state.specs.get(path);
+  const prefix = { head_washer: "头侧垫片 · ", nut_washer: "螺母侧垫片 · " }[path.split(".")[0]] || "";
+  return prefix + (spec?.label || path || "输入");
 }
 
 function showError(message, fieldErrors) {
@@ -560,7 +578,11 @@ function goToField(path) {
   } else if (state.specs.has(path)) {
     showInputTab(GROUP_TABS[state.specs.get(path).group]);
   }
-  document.getElementById(fieldId(path))?.focus();
+  const control = document.getElementById(fieldId(path));
+  const group = control?.closest("details");
+  if (group) group.open = true;
+  control?.scrollIntoView({ block: "nearest" });
+  control?.focus({ preventScroll: true });
 }
 
 function markErrors() {
@@ -600,7 +622,7 @@ function render(data) {
     el("small", {}, failing.length
       ? `不通过：${failing.join("、")}`
       : data.provisional_sources.length
-        ? "计算校核均满足要求，但使用了未经核验的目录/表格数据，结果不得作为最终结论。"
+        ? "计算校核均满足要求，但数据或模型假设待核验，结果不得作为最终结论。"
         : "全部校核满足要求。"),
   );
   banner.hidden = false;
@@ -668,7 +690,13 @@ function svgShape(shape) {
     for (let i = 0; i < p.length; i += 2) pairs.push(`${p[i]},${p[i + 1]}`);
     node = svgEl("polygon", { points: pairs.join(" ") });
   } else if (shape.kind === "line") {
-    node = svgEl("line", { x1: p[0], y1: p[1], x2: p[2], y2: p[3] });
+    if (p.length === 4) {
+      node = svgEl("line", { x1: p[0], y1: p[1], x2: p[2], y2: p[3] });
+    } else {
+      const pairs = [];
+      for (let i = 0; i < p.length; i += 2) pairs.push(`${p[i]},${p[i + 1]}`);
+      node = svgEl("polyline", { points: pairs.join(" ") });
+    }
   } else {
     node = svgEl("text", {
       x: p[0], y: p[1], "text-anchor": shape.anchor, "dominant-baseline": "central", "font-size": shape.size,
@@ -678,10 +706,13 @@ function svgShape(shape) {
   }
   node.setAttribute("fill", shape.kind === "line" ? "none" : shape.fill || "none");
   node.setAttribute("stroke", shape.stroke || "none");
-  if (shape.stroke) node.setAttribute("stroke-width", "1");
-  if (shape.dash) node.setAttribute("stroke-dasharray", "4 3");
+  if (shape.stroke) node.setAttribute("stroke-width", String(shape.stroke_width));
+  if (shape.dash_pattern.length) node.setAttribute("stroke-dasharray", shape.dash_pattern.join(" "));
+  else if (shape.dash) node.setAttribute("stroke-dasharray", "4 3");
+  node.setAttribute("stroke-linejoin", "round");
   if (shape.opacity < 1) node.setAttribute(shape.kind === "polygon" ? "fill-opacity" : "opacity", shape.opacity);
   if (shape.role) node.dataset.role = shape.role;
+  if (shape.target) node.dataset.target = shape.target;
   return node;
 }
 
@@ -691,11 +722,12 @@ function drawSection(section) {
   svg.setAttribute("viewBox", `0 0 ${section.width} ${section.height}`);
   for (const shape of section.shapes) {
     const node = svgShape(shape);
-    const plate = /^plate-(\d+)$/.exec(shape.role);
-    if (plate && shape.kind === "rect") {
+    if (shape.target && ["rect", "polygon"].includes(shape.kind)) {
       const title = svgEl("title", {});
-      title.textContent = `点击编辑板层 ${Number(plate[1]) + 1}`;
+      title.textContent = `点击编辑：${labelForPath(shape.target)}`;
       node.append(title);
+      node.setAttribute("tabindex", "0");
+      node.setAttribute("aria-label", title.textContent);
     }
     svg.append(node);
   }
@@ -765,9 +797,15 @@ async function init() {
   $("#value-filter").addEventListener("input", filterValues);
   $("#export").addEventListener("click", exportReport);
   $("#section").addEventListener("click", (event) => {
-    const role = event.target.closest("[data-role]")?.dataset.role || "";
-    const plate = /^plate-(\d+)$/.exec(role);
-    if (plate) selectLayer(Number(plate[1]), true);
+    const target = event.target.closest("[data-target]")?.dataset.target;
+    if (target) goToField(target);
+  });
+  $("#section").addEventListener("keydown", (event) => {
+    const target = event.target.closest("[data-target]")?.dataset.target;
+    if (target && ["Enter", " "].includes(event.key)) {
+      event.preventDefault();
+      goToField(target);
+    }
   });
   new ResizeObserver(() => {
     const view = viewSize();

@@ -12,8 +12,10 @@ from typing import Any
 from vdi2230 import data as engineering_data
 
 
-SCHEMA_ID = "vdi2230.general/1"
+SCHEMA_ID = "vdi2230.general/2"
 MAX_LAYERS = 10
+WASHER_SECTIONS = ("head_washer", "nut_washer")
+WASHER_ESTIMATE_SOURCE = "default:平垫片经验尺寸"
 
 
 @dataclass(frozen=True)
@@ -30,6 +32,7 @@ class FieldSpec:
     choices: tuple[tuple[str, str], ...] = ()
     group: str = ""
     help: str = ""
+    diameter_factor: float | None = None
 
     @property
     def name(self) -> str:
@@ -49,6 +52,7 @@ class FieldSpec:
             "choices": [list(choice) for choice in self.choices],
             "group": self.group,
             "help": self.help,
+            "diameter_factor": self.diameter_factor,
         }
 
 
@@ -68,6 +72,20 @@ CONE_MODES = (("auto", "自动"), ("TBJ", "DSV 锥公式 (43)"), ("TTJ", "ESV �
 W_MODES = (("auto", "自动"), ("1", "w = 1"), ("2", "w = 2"))
 SIDES = (("head", "螺栓头"), ("nut", "螺母"))
 SV_CLASSES = tuple((f"SV{i}", f"SV{i}") for i in range(1, 7))
+
+
+def _washer_specs(section: str, label: str) -> tuple[FieldSpec, ...]:
+    return (
+        _f(f"{section}.enabled", f"启用{label}", "", False, "plates", kind="bool"),
+        _f(f"{section}.inner_diameter", "垫片内径 di", "mm", 13.2, "plates", diameter_factor=1.1, help="经验值 1.1d，可修改", **POSITIVE),
+        _f(f"{section}.outer_diameter", "垫片外径 Do", "mm", 24.0, "plates", diameter_factor=2.0, help="经验值 2d，可修改", **POSITIVE),
+        _f(f"{section}.thickness", "垫片厚度 t", "mm", 1.92, "plates", diameter_factor=0.16, help="经验值 0.16d，可修改", **POSITIVE),
+        _f(f"{section}.material_id", "垫片材料", "", "S355J0", "plates", kind="text", optional=True),
+        _f(f"{section}.youngs_modulus", "弹性模量 EW", "MPa", 205_000.0, "plates", **POSITIVE),
+        _f(f"{section}.limiting_surface_pressure", "极限面压 pG", "MPa", 760.0, "plates", **POSITIVE),
+        _f(f"{section}.roughness_rz", "粗糙度 Rz", "μm", 16.0, "plates", **NON_NEGATIVE),
+    )
+
 
 FIELD_SPECS: tuple[FieldSpec, ...] = (
     _f("joint.type", "连接类型", "", "DSV", "bolt", kind="choice", choices=JOINT_TYPES),
@@ -91,7 +109,7 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
     _f("bolt.tensile_strength_max", "最大抗拉强度 Rm,max", "MPa", None, "bolt", optional=True, help="留空 = 1.2·Rm", **POSITIVE),
     _f("bolt.shear_ratio", "剪切强度比 τB/Rm", "", 0.65, "bolt", minimum=0.3, maximum=1.2),
     _f("bolt.rolling", "螺纹滚压", "", "SV", "bolt", kind="choice", choices=ROLLING),
-    _f("bolt.thread_friction", "螺纹摩擦 μG", "", 0.12, "bolt", **FRICTION),
+    _f("bolt.thread_friction", "摩擦 μG = μK", "", 0.12, "bolt", help="螺纹与拧紧侧支承面摩擦系数始终相等", **FRICTION),
     _f("nut.height", "螺母高度 m", "mm", 10.8, "bolt", **POSITIVE),
     _f("nut.bearing_diameter", "螺母支承直径 dW", "mm", 16.6, "bolt", **POSITIVE),
     _f("nut.width_across_flats", "螺母对边 s", "mm", 18.0, "bolt", **POSITIVE),
@@ -109,6 +127,8 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
     _f("joint.chamfer_diameter", "倒角直径 dha", "mm", None, "plates", optional=True, help="留空 = dh", **POSITIVE),
     _f("joint.outer_diameter", "外径 DA", "mm", 40.0, "plates", **POSITIVE),
     _f("joint.substitute_diameter", "替代外径 DA′", "mm", None, "plates", optional=True, help="留空 = DA；用于 y = DA′/dW", **POSITIVE),
+    *_washer_specs("head_washer", "头侧垫片"),
+    *_washer_specs("nut_washer", "螺母侧垫片"),
     _f("load.axial_max", "轴向载荷 FA,max", "N", 10_000.0, "load", **NON_NEGATIVE),
     _f("load.axial_min", "轴向载荷 FA,min", "N", 0.0, "load", **NON_NEGATIVE),
     _f("load.transverse", "横向载荷 FQ,max", "N", 0.0, "load", **NON_NEGATIVE),
@@ -150,7 +170,6 @@ LAYER_SPECS: tuple[FieldSpec, ...] = (
     _f("limiting_surface_pressure", "极限面压 pG", "MPa", 760.0, "plates", **POSITIVE),
     _f("roughness_rz", "粗糙度 Rz", "μm", 16.0, "plates", **NON_NEGATIVE),
     _f("interface_friction", "界面摩擦 μT", "", 0.15, "plates", **FRICTION),
-    _f("bearing_friction", "支承摩擦 μK", "", 0.12, "plates", **FRICTION),
 )
 
 SPEC_BY_PATH = {spec.path: spec for spec in FIELD_SPECS}
@@ -192,6 +211,10 @@ class BoltInput:
     rolling: str
     thread_friction: float
 
+    @property
+    def bearing_friction(self) -> float:
+        return self.thread_friction
+
 
 @dataclass(frozen=True)
 class NutInput:
@@ -223,7 +246,18 @@ class PlateLayer:
     limiting_surface_pressure: float
     roughness_rz: float
     interface_friction: float
-    bearing_friction: float
+
+
+@dataclass(frozen=True)
+class WasherInput:
+    enabled: bool
+    inner_diameter: float
+    outer_diameter: float
+    thickness: float
+    material_id: str | None
+    youngs_modulus: float
+    limiting_surface_pressure: float
+    roughness_rz: float
 
 
 @dataclass(frozen=True)
@@ -295,6 +329,8 @@ SECTION_TYPES: dict[str, type] = {
     "bolt": BoltInput,
     "nut": NutInput,
     "tapped": TappedInput,
+    "head_washer": WasherInput,
+    "nut_washer": WasherInput,
     "load": LoadInput,
     "load_introduction": LoadIntroductionInput,
     "assembly": AssemblyInput,
@@ -311,6 +347,8 @@ class GeneralInput:
     bolt: BoltInput
     nut: NutInput
     tapped: TappedInput
+    head_washer: WasherInput
+    nut_washer: WasherInput
     plates: tuple[PlateLayer, ...]
     load: LoadInput
     load_introduction: LoadIntroductionInput
@@ -326,7 +364,33 @@ class GeneralInput:
 
     @property
     def clamp_length(self) -> float:
+        return self.plate_length + self.head_washer_thickness + self.nut_washer_thickness
+
+    @property
+    def plate_length(self) -> float:
         return sum(layer.thickness for layer in self.plates)
+
+    @property
+    def head_washer_thickness(self) -> float:
+        return self.head_washer.thickness if self.head_washer.enabled else 0.0
+
+    @property
+    def nut_washer_thickness(self) -> float:
+        return self.nut_washer.thickness if self.is_through_bolt and self.nut_washer.enabled else 0.0
+
+    def washer_at(self, side: str) -> WasherInput | None:
+        washer = self.head_washer if side == "head" else self.nut_washer
+        return washer if washer.enabled and (side == "head" or self.is_through_bolt) else None
+
+    def bearing_outer(self, side: str) -> float:
+        diameter = self.bolt.head_bearing_diameter if side == "head" else self.nut.bearing_diameter
+        washer = self.washer_at(side)
+        return min(diameter, washer.outer_diameter, self.joint.outer_diameter) if washer else diameter
+
+    def bearing_inner(self, side: str) -> float:
+        chamfer = self.joint.chamfer_diameter or self.joint.hole_diameter
+        washer = self.washer_at(side)
+        return max(chamfer, self.joint.hole_diameter, washer.inner_diameter) if washer else chamfer
 
     def to_json(self) -> dict[str, Any]:
         def convert(value: Any) -> Any:
@@ -365,6 +429,12 @@ def default_input_json() -> dict[str, Any]:
     provenance.update(engineering_data.material_value_sources(payload["tapped"]["material_id"], "tapped"))
     for index, layer in enumerate(payload["plates"]):
         provenance.update(engineering_data.material_value_sources(layer["material_id"], f"plates[{index}]"))
+    for section in WASHER_SECTIONS:
+        for name in ("youngs_modulus", "limiting_surface_pressure"):
+            provenance[f"{section}.{name}"] = f"material:{payload[section]['material_id']}"
+    for spec in FIELD_SPECS:
+        if spec.diameter_factor is not None:
+            provenance[spec.path] = WASHER_ESTIMATE_SOURCE
     payload["provenance"] = provenance
     return payload
 
@@ -438,13 +508,19 @@ def parse_general_input(data: Any) -> GeneralInput:
     if not isinstance(data, dict):
         raise InputValidationError([FieldError("", "输入应为 JSON 对象")])
     if data.get("schema", SCHEMA_ID) != SCHEMA_ID:
-        errors.append(FieldError("schema", f"仅支持 {SCHEMA_ID}"))
+        errors.append(FieldError("schema", f"仅支持 {SCHEMA_ID}；旧版需移除板层 μK，并确认采用螺栓 μK = μG"))
 
     values: dict[str, dict[str, Any]] = {name: {} for name in SECTION_TYPES}
+    if "bearing_friction" in _section_payload(data, "bolt", errors):
+        errors.append(FieldError("bolt.thread_friction", "μK 由 μG 派生，请只提交 thread_friction，不要单独提交 bearing_friction"))
     for spec in FIELD_SPECS:
         section, name = spec.path.split(".", 1)
         payload = _section_payload(data, section, errors)
         raw = payload.get(name, spec.default)
+        if spec.diameter_factor is not None and name not in payload:
+            diameter = values["bolt"].get("d")
+            if isinstance(diameter, (int, float)) and diameter > 0:
+                raw = round(diameter * spec.diameter_factor, 6)
         values[section][name] = _parse_value(spec, raw, spec.path, errors)
 
     layers_raw = data.get("plates")
@@ -460,6 +536,8 @@ def parse_general_input(data: Any) -> GeneralInput:
         if not isinstance(raw_layer, dict):
             errors.append(FieldError(prefix, "应为对象"))
             continue
+        if "bearing_friction" in raw_layer:
+            errors.append(FieldError(f"{prefix}.bearing_friction", "板层 μK 已移除，请在螺栓中使用 μG = μK"))
         layer_values = {
             spec.name: _parse_value(spec, raw_layer.get(spec.name, spec.default), f"{prefix}.{spec.name}", errors)
             for spec in LAYER_SPECS
@@ -535,6 +613,21 @@ def _validate_relations(item: GeneralInput) -> None:
     require(joint.outer_diameter > joint.hole_diameter, "joint.outer_diameter", "须大于 dh")
     if joint.substitute_diameter is not None:
         require(joint.substitute_diameter > joint.hole_diameter, "joint.substitute_diameter", "须大于 dh")
+    for side in ("head", "nut"):
+        washer = item.washer_at(side)
+        if washer is None:
+            continue
+        prefix = f"{side}_washer"
+        require(washer.inner_diameter > bolt.d, f"{prefix}.inner_diameter", "须大于螺栓公称直径 d")
+        require(washer.outer_diameter > washer.inner_diameter, f"{prefix}.outer_diameter", "须大于垫片内径 di")
+        require(
+            item.bearing_outer(side) > item.bearing_inner(side),
+            f"{prefix}.inner_diameter",
+            "垫片、支承面和板层须有共同的有效承压环面（外径须大于内径、dh 和 dha）",
+        )
+        if cone_start is not None:
+            require(cone_start <= item.bearing_outer(side), "advanced.cone_start_diameter", "使用垫片时，锥起始直径不得超过保守有效承压外径")
+            require(cone_start > washer.inner_diameter, "advanced.cone_start_diameter", "使用垫片时，锥起始直径须大于垫片内径")
     require(load.axial_min <= load.axial_max, "load.axial_min", "须 ≤ FA,max")
     if load.torque > 0:
         require(load.friction_radius is not None, "load.friction_radius", "有扭矩时必填")
@@ -570,6 +663,7 @@ def field_schema_json() -> dict[str, Any]:
     return {
         "schema": SCHEMA_ID,
         "max_layers": MAX_LAYERS,
+        "washer_estimate_source": WASHER_ESTIMATE_SOURCE,
         "fields": [spec.to_json() for spec in FIELD_SPECS],
         "layer_fields": [spec.to_json() for spec in LAYER_SPECS],
         "defaults": default_input_json(),

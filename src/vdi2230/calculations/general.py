@@ -15,6 +15,9 @@ from vdi2230.domain.general_inputs import (
     FieldError,
     GeneralInput,
     InputValidationError,
+    PlateLayer,
+    WasherInput,
+    WASHER_SECTIONS,
 )
 from vdi2230.domain.models import (
     CalculationResult,
@@ -158,10 +161,9 @@ def deformation_diameter(
     start_nut: float,
 ) -> float:
     """Outer diameter of the deformation body at depth ``position`` below the head."""
-    if w == 2 or position <= clamp / 2:
-        raw = start_head + 2 * position * tan_phi
-    else:
-        raw = start_nut + 2 * (clamp - position) * tan_phi
+    raw = start_head + 2 * position * tan_phi
+    if w == 1:
+        raw = min(raw, start_nut + 2 * (clamp - position) * tan_phi)
     return min(raw, outer)
 
 
@@ -176,7 +178,7 @@ def deformation_breakpoints(
     """Depths where the deformation-body outline changes slope (cone apex, cone/sleeve)."""
     points = {0.0, clamp}
     if w == 1:
-        points.add(clamp / 2)
+        points.add(clamp / 2 + (start_nut - start_head) / (4 * tan_phi))
     if outer > start_head:
         points.add((outer - start_head) / (2 * tan_phi))
     if w == 1 and outer > start_nut:
@@ -192,8 +194,7 @@ def _plate_compliance(
     start_nut: float,
 ) -> float:
     """Integrate the cone/sleeve deformation body layer by layer (eq. 40/41 generalised)."""
-    clamp = item.clamp_length
-    hole = item.joint.hole_diameter
+    clamp = item.plate_length
     outer = item.joint.outer_diameter
 
     def diameter(position: float) -> float:
@@ -216,6 +217,16 @@ def _plate_compliance(
             len(item.plates) - 1,
         )
         modulus = item.plates[index].youngs_modulus
+        hole = item.joint.hole_diameter
+        hole_path = "joint.hole_diameter"
+        for side, edge in (("head", 0), ("nut", len(item.plates) - 1)):
+            washer = item.washer_at(side)
+            if index == edge and washer and washer.inner_diameter > hole:
+                hole, hole_path = washer.inner_diameter, f"{side}_washer.inner_diameter"
+        if min(diameter(start), diameter(end)) <= hole:
+            raise InputValidationError([
+                FieldError(hole_path, "孔径须小于相邻板层全厚度内的有效变形体直径；请检查垫片及支承尺寸"),
+            ])
         if diameter(middle) >= outer - 1e-12:
             compliance += 4 * (end - start) / (modulus * math.pi * (outer**2 - hole**2))
         else:
@@ -230,11 +241,39 @@ def _status(value: float, required: float) -> ResultStatus:
     return ResultStatus.PASS if value >= required else ResultStatus.FAIL
 
 
+def _bearing_check(item: GeneralInput, side: str, force: float, v: _Values) -> float:
+    suffix = "K" if side == "head" else "M"
+    label = "螺栓头侧" if side == "head" else "螺母侧"
+    layer = item.plates[0 if side == "head" else -1]
+    washer = item.washer_at(side)
+    outer, inner = item.bearing_outer(side), item.bearing_inner(side)
+    area = v.add(f"Ap,{suffix}", f"{label}板层支承面积", area_circle(outer) - area_circle(inner), "mm²",
+                 "R10: π/4·(Deff²−di,eff²)" if washer else "R10: π/4·(dW²−dha²)")
+    pressure = v.add(f"pmax,{suffix}", f"{label}板层最大面压", force / area, "MPa", "R10/1, R10/2")
+    safety = layer.limiting_surface_pressure / pressure
+    if washer:
+        v.add(f"Sp,P,{suffix}", f"{label}板层面压安全系数", safety, "", "R10/4")
+        bearing = item.bolt.head_bearing_diameter if side == "head" else item.nut.bearing_diameter
+        washer_area = v.add(f"Ap,W,{suffix}", f"{label}垫片与紧固件接触面积",
+                            area_circle(min(bearing, washer.outer_diameter)) - area_circle(washer.inner_diameter),
+                            "mm²", "π/4·(min(dW,Do)²−di²)，不计垫片扩散")
+        washer_pressure = v.add(f"pmax,W,{suffix}", f"{label}垫片最大面压",
+                                max(force / washer_area, pressure), "MPa", "垫片两接触面面压的最大值")
+        washer_safety = v.add(f"Sp,W,{suffix}", f"{label}垫片面压安全系数",
+                             washer.limiting_surface_pressure / washer_pressure, "", "R10/4")
+        safety = min(safety, washer_safety)
+    return v.add(f"Sp,{suffix}", f"{label}面压安全系数", safety, "", "R10/4",
+                 "取板层与垫片面压安全系数中的较小值" if washer else "")
+
+
 def calculate_general(item: GeneralInput) -> GeneralCalculationResult:
     v = _Values()
     warnings: list[str] = []
     provisional: dict[str, str] = {}
     for path, source in sorted(item.provenance.items()):
+        section = path.split(".")[0]
+        if section in WASHER_SECTIONS and not item.washer_at(section.split("_")[0]):
+            continue
         if engineering_data.source_is_provisional(source):
             provisional[path] = source
 
@@ -252,7 +291,8 @@ def calculate_general(item: GeneralInput) -> GeneralCalculationResult:
     chamfer = joint.chamfer_diameter or hole
 
     # R0 geometry
-    clamp = v.add("lK", "夹紧长度", item.clamp_length, "mm", "lK = Σh")
+    clamp = v.add("lK", "夹紧长度", item.clamp_length, "mm", "lK = Σh + tW,K + tW,M")
+    plate_length = v.add("lP", "板层总厚度", item.plate_length, "mm", "lP = Σh（不含垫片）")
     shank_total = 0.0 if bolt.thread_length is None else bolt.length - bolt.thread_length
     l1 = v.add("l1", "夹紧区内光杆长度", min(max(shank_total, 0.0), clamp), "mm", "l1 = min(l − b, lK)")
     l_gew = v.add("lGew", "夹紧区内自由螺纹长度", clamp - l1, "mm", "lGew = lK − l1")
@@ -283,26 +323,39 @@ def calculate_general(item: GeneralInput) -> GeneralCalculationResult:
 
     w = (1 if dsv else 2) if item.advanced.w == "auto" else int(item.advanced.w)
     cone_kind = ("TBJ" if dsv else "TTJ") if item.advanced.cone == "auto" else item.advanced.cone
-    start_head = item.advanced.cone_start_diameter or bolt.head_bearing_diameter
-    start_nut = item.advanced.cone_start_diameter or (nut.bearing_diameter if dsv else start_head)
+    start_head = item.advanced.cone_start_diameter or item.bearing_outer("head")
+    start_nut = item.advanced.cone_start_diameter or (item.bearing_outer("nut") if dsv else start_head)
     reference_diameter = (start_head + start_nut) / 2 if w == 1 else start_head
     substitute = joint.substitute_diameter or joint.outer_diameter
-    beta = v.add("βL", "夹紧长度比", clamp / reference_diameter, "", "βL = lK/dW")
+    beta = v.add("βL", "板层长度比", plate_length / reference_diameter, "", "βL = lP/dW（垫片另计柔度）")
     y_ratio = v.add("y", "外径比", substitute / reference_diameter, "", "y = DA′/dW")
     tan_phi = _cone_tangent(cone_kind, beta, y_ratio)
     if tan_phi <= 0.05:
         raise InputValidationError([FieldError("joint.substitute_diameter", "βL/y 超出锥角公式适用范围")])
     v.add("tanφ", "替代锥角正切", tan_phi, "", "式 (43) DSV" if cone_kind == "TBJ" else "式 (42) ESV")
-    limiting_value = reference_diameter + w * clamp * tan_phi
+    limiting_value = reference_diameter + w * plate_length * tan_phi
     limiting = v.add(
         "DA,Gr",
         "极限直径",
         limiting_value,
         "mm",
-        "DA,Gr = dW + w·lK·tanφ",
+        "DA,Gr = dW + w·lP·tanφ",
         "DA ≥ DA,Gr：变形体为纯锥体" if joint.outer_diameter >= limiting_value else "DA < DA,Gr：锥体 + 套筒",
     )
-    delta_p = v.add("δP", "被夹件柔度", _plate_compliance(item, w, tan_phi, start_head, start_nut), "mm/N", "式 (40)/(41)，逐层积分")
+    plate_compliance = v.add("δP,plates", "板层柔度", _plate_compliance(item, w, tan_phi, start_head, start_nut),
+                            "mm/N", "式 (40)/(41)，仅对板层逐层积分")
+    washer_compliance = 0.0
+    for side, suffix in (("head", "K"), ("nut", "M")):
+        washer = item.washer_at(side)
+        if washer:
+            area = area_circle(item.bearing_outer(side)) - area_circle(item.bearing_inner(side))
+            washer_compliance += v.add(f"δW,{suffix}", f"{'头' if side == 'head' else '螺母'}侧垫片柔度",
+                                      washer.thickness / (washer.youngs_modulus * area), "mm/N",
+                                      "t/(EW·Aeff)，共同承压环面，不计载荷扩散")
+            provisional[f"{side}_washer.model"] = "default:保守平垫片模型（弯曲与载荷扩散未验证）"
+    if washer_compliance:
+        warnings.append("垫片采用保守平垫片模型：不按整个外径扩散载荷；计入厚度、环形压缩柔度、嵌入与两接触面面压。垫片弯曲、局部屈服及实际载荷分布仍须另行验证。")
+    delta_p = v.add("δP", "被夹件总柔度", plate_compliance + washer_compliance, "mm/N", "δP = δP,plates + ΣδW")
     delta_pzu = v.add("δPzu", "附加柔度", (w - 1) * delta_m, "mm/N", "δPzu = (w−1)·δM")
     v.add("w", "连接系数", float(w), "", "DSV w=1, ESV w=2")
 
@@ -406,16 +459,9 @@ def calculate_general(item: GeneralInput) -> GeneralCalculationResult:
 
     # R10 surface pressure
     fv_max = fmzul - fz_force
-    area_head_bearing = v.add("Ap,K", "螺栓头支承面积", math.pi / 4 * (bolt.head_bearing_diameter**2 - chamfer**2), "mm²", "R10: π/4·(dW²−dha²)")
-    p_head = max(fmzul, fv_max + fsa_max) / area_head_bearing
-    v.add("pmax,K", "螺栓头最大面压", p_head, "MPa", "R10/1, R10/2")
-    sp_head = v.add("Sp,K", "螺栓头面压安全系数", layers[0].limiting_surface_pressure / p_head, "", "R10/4")
-    sp_nut = None
-    if dsv:
-        area_nut_bearing = v.add("Ap,M", "螺母支承面积", math.pi / 4 * (nut.bearing_diameter**2 - chamfer**2), "mm²", "R10: π/4·(dW²−dha²)")
-        p_nut = max(fmzul, fv_max + fsa_max) / area_nut_bearing
-        v.add("pmax,M", "螺母侧最大面压", p_nut, "MPa", "R10/1, R10/2")
-        sp_nut = v.add("Sp,M", "螺母侧面压安全系数", layers[-1].limiting_surface_pressure / p_nut, "", "R10/4")
+    bearing_force = max(fmzul, fv_max + fsa_max)
+    sp_head = _bearing_check(item, "head", bearing_force, v)
+    sp_nut = _bearing_check(item, "nut", bearing_force, v) if dsv else None
 
     # R11 engagement
     engagement_check = _engagement_check(item, v, engagement, a0, provisional, warnings)
@@ -426,12 +472,12 @@ def calculate_general(item: GeneralInput) -> GeneralCalculationResult:
     sa = None
     if load.transverse > 0:
         interface_positions = []
-        position = 0.0
+        position = item.head_washer_thickness
         for layer in interfaces if (dsv and len(layers) > 1) or not dsv else []:
             position += layer.thickness
             interface_positions.append(position)
         if not interface_positions:
-            interface_positions = [0.0]
+            interface_positions = [item.head_washer_thickness]
         shear_area = min(area_shank if pos <= l1 + 1e-9 else area_d3 for pos in interface_positions)
         v.add("Aτ", "剪切面截面积", shear_area, "mm²", "R12/5")
         tau_b = v.add("τB", "螺栓抗剪强度", bolt.shear_ratio * bolt.tensile_strength, "MPa", "表 7: (τB/Rm)·Rm")
@@ -439,12 +485,13 @@ def calculate_general(item: GeneralInput) -> GeneralCalculationResult:
         sa = v.add("SA", "抗剪安全系数", tau_b * shear_area / load.transverse, "", "R12/7")
 
     # R13 tightening torque
-    if assembly.tighten_side == "nut" and dsv:
-        bearing_d, mu_k = nut.bearing_diameter, layers[-1].bearing_friction
-    else:
-        bearing_d, mu_k = bolt.head_bearing_diameter, layers[0].bearing_friction
-    dkm = v.add("DKm", "支承摩擦平均直径", (bearing_d + chamfer) / 2, "mm", "R13: (dW + dha)/2")
-    v.add("μK", "支承面摩擦系数", mu_k, "", "拧紧侧板层数据")
+    side = assembly.tighten_side
+    bearing_d = nut.bearing_diameter if side == "nut" else bolt.head_bearing_diameter
+    washer = item.washer_at(side)
+    contact_inner = washer.inner_diameter if washer else chamfer
+    contact_outer = min(bearing_d, washer.outer_diameter) if washer else bearing_d
+    dkm = v.add("DKm", "支承摩擦平均直径", (contact_outer + contact_inner) / 2, "mm", "R13: 拧紧件接触环面内外径的平均值（垫片不随拧紧件转动）")
+    mu_k = v.add("μK", "支承面摩擦系数", bolt.bearing_friction, "", "螺栓输入；假设 μK = μG")
     v.add("MA", "拧紧力矩", fmzul * (0.16 * pitch + 0.58 * d2 * bolt.thread_friction + dkm / 2 * mu_k) / 1000, "N·m", "R13/1")
 
     req = item.requirements
@@ -483,7 +530,7 @@ def calculate_general(item: GeneralInput) -> GeneralCalculationResult:
     else:
         verdict, verdict_label = ResultStatus.PASS, ResultStatus.PASS.value
     if provisional_sources:
-        warnings.insert(0, "使用了未经核验的目录/表格数据，结果须核验后方可作为最终结论。")
+        warnings.insert(0, "使用了未经核验的数据或模型假设，结果须核验后方可作为最终结论。")
 
     result = CalculationResult(
         case_id="GENERAL",
@@ -517,30 +564,37 @@ def calculate_general(item: GeneralInput) -> GeneralCalculationResult:
 
 
 def _table_embedding(item: GeneralInput, shear: bool) -> float:
-    layers = item.plates
+    contacts: list[tuple[str, PlateLayer | WasherInput]] = [
+        (f"plates[{index}]", layer) for index, layer in enumerate(item.plates)
+    ]
+    if item.washer_at("head"):
+        contacts.insert(0, ("head_washer", item.head_washer))
+    if item.washer_at("nut"):
+        contacts.append(("nut_washer", item.nut_washer))
 
-    def values(index: int, roughness: float) -> tuple[float, float, float]:
+    def values(index: int) -> tuple[float, float, float]:
+        path, part = contacts[index]
         try:
-            return engineering_data.embedding_values(roughness, shear)
+            return engineering_data.embedding_values(part.roughness_rz, shear)
         except ValueError as error:
             raise InputValidationError([
-                FieldError(f"plates[{index}].roughness_rz", f"{error}；请改用手动 fZ"),
+                FieldError(f"{path}.roughness_rz", f"{error}；请改用手动 fZ"),
             ]) from error
 
-    thread, head_bearing, _ = values(0, layers[0].roughness_rz)
+    thread, head_bearing, _ = values(0)
     total = thread + head_bearing
     if item.is_through_bolt:
-        total += values(len(layers) - 1, layers[-1].roughness_rz)[1]
+        total += values(len(contacts) - 1)[1]
     override = item.embedding.interface_count
     if override is not None:
-        roughest = max(range(len(layers)), key=lambda i: layers[i].roughness_rz)
-        total += override * values(roughest, layers[roughest].roughness_rz)[2]
+        roughest = max(range(len(contacts)), key=lambda i: contacts[i][1].roughness_rz)
+        total += override * values(roughest)[2]
         return total
-    for index in range(len(layers) - 1):
-        roughest = index if layers[index].roughness_rz >= layers[index + 1].roughness_rz else index + 1
-        total += values(roughest, layers[roughest].roughness_rz)[2]
+    for index in range(len(contacts) - 1):
+        roughest = index if contacts[index][1].roughness_rz >= contacts[index + 1][1].roughness_rz else index + 1
+        total += values(roughest)[2]
     if not item.is_through_bolt:
-        total += values(len(layers) - 1, layers[-1].roughness_rz)[2]
+        total += values(len(contacts) - 1)[2]
     return total
 
 

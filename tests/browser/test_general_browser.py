@@ -57,6 +57,93 @@ class GeneralBrowserTests(unittest.TestCase):
     def plate_rects(self, index: int):
         return self.page.locator(f'#section rect[data-role="plate-{index}"]')
 
+    def enable_washers(self):
+        self.page.get_by_role("tab", name="板层").click()
+        for side, title in (("head", "头侧垫片"), ("nut", "螺母侧垫片（DSV）")):
+            self.page.locator("summary").get_by_text(title, exact=True).click()
+            self.page.locator(f"#f-{side}_washer-enabled").check()
+        expect(self.metric("lK")).to_have_text("43.84 mm")
+
+    def test_washers_autofill_allow_override_and_update_clamp(self):
+        page = self.page
+        self.enable_washers()
+        expect(page.locator("#f-head_washer-inner_diameter")).to_have_value("13.2")
+        expect(page.locator("#f-head_washer-outer_diameter")).to_have_value("24")
+        expect(page.locator("#f-head_washer-thickness")).to_have_value("1.92")
+        page.locator("#f-head_washer-thickness").fill("3")
+        page.locator("#f-head_washer-outer_diameter").fill("30")
+        expect(self.metric("lK")).to_have_text("44.92 mm")
+        page.get_by_role("tab", name="螺栓", exact=True).click()
+        page.locator("#f-bolt-catalog_variant_id").select_option("ISO4014-M16x2.0")
+        expect(page.locator("#f-head_washer-inner_diameter")).to_have_value("17.6")
+        expect(page.locator("#f-nut_washer-thickness")).to_have_value("2.56")
+        expect(page.locator("#f-head_washer-thickness")).to_have_value("3")
+        expect(page.locator("#f-head_washer-outer_diameter")).to_have_value("30")
+        expect(self.metric("lK")).to_have_text("45.56 mm")
+        page.get_by_role("tab", name="报告", exact=True).click()
+        expect(page.locator("#report-preview")).to_contain_text("头侧垫片")
+        expect(page.locator("#report-preview")).to_contain_text("不计载荷扩散")
+
+    def test_clicking_each_part_activates_tab_expands_section_and_focuses_field(self):
+        page = self.page
+        self.enable_washers()
+        for selector, field, tab in (
+            ("polygon[data-role='bolt-head']", "bolt-head_height", "bolt"),
+            ("rect[data-role='bolt-shank']", "bolt-length", "bolt"),
+            ("polygon[data-role='bolt-thread']", "bolt-length", "bolt"),
+            ("polygon[data-role='nut']", "nut-height", "bolt"),
+            ("rect[data-role='washer-head']", "head_washer-thickness", "plates"),
+            ("rect[data-role='washer-nut']", "nut_washer-thickness", "plates"),
+        ):
+            with self.subTest(part=selector):
+                page.get_by_role("tab", name="载荷").click()
+                page.locator(f"#section {selector}").first.click()
+                expect(page.locator(f"#tab-{tab}")).to_have_attribute("aria-selected", "true")
+                expect(page.locator(f"#f-{field}")).to_be_focused()
+                expect(page.locator(f"#f-{field}")).to_be_in_viewport()
+        self.assertLessEqual(page.evaluate("document.documentElement.scrollHeight"), page.evaluate("innerHeight"))
+        page.locator("#section polygon[data-role='bolt-head']").focus()
+        page.keyboard.press("Enter")
+        expect(page.locator("#f-bolt-head_height")).to_be_focused()
+
+    def test_washer_validation_and_material_selection(self):
+        page = self.page
+        self.enable_washers()
+        page.locator("#f-head_washer-material_id").select_option("42CrMo4")
+        expect(page.locator(".field[data-path='head_washer.youngs_modulus'] .src")).to_have_attribute("title", re.compile("42CrMo4"))
+        page.locator("#f-head_washer-inner_diameter").fill("20")
+        expect(page.get_by_role("alert")).to_contain_text("有效承压环面")
+        expect(self.export).to_be_disabled()
+        page.get_by_role("tab", name="载荷").click()
+        page.get_by_role("alert").get_by_role("button").click()
+        expect(page.locator("#f-head_washer-inner_diameter")).to_be_focused()
+        page.locator("#f-head_washer-inner_diameter").fill("13.2")
+        expect(self.export).to_be_enabled()
+
+    def test_esv_ignores_nut_washer_and_removes_its_drawing(self):
+        page = self.page
+        self.enable_washers()
+        page.get_by_role("tab", name="螺栓", exact=True).click()
+        page.locator("#f-joint-type").select_option("ESV")
+        expect(self.metric("lK")).to_have_text("41.92 mm")
+        expect(page.locator("#section [data-role='washer-nut']")).to_have_count(0)
+        expect(page.locator("#section [data-role='washer-head']").first).to_be_attached()
+        page.get_by_role("tab", name="板层").click()
+        expect(page.locator("#f-nut_washer-enabled")).to_be_hidden()
+        page.get_by_role("tab", name="螺栓", exact=True).click()
+        page.locator("#f-joint-type").select_option("DSV")
+        expect(self.metric("lK")).to_have_text("43.84 mm")
+
+    def test_single_bolt_friction_input_drives_mu_k(self):
+        page = self.page
+        with page.expect_response(CALCULATE) as response:
+            page.locator("#f-bolt-thread_friction").fill("0.18")
+        result = response.value.json()
+        self.assertAlmostEqual(next(value["value"] for value in result["values"] if value["symbol"] == "μK"), 0.18)
+        self.assertFalse(any("bearing_friction" in layer for layer in result["input"]["plates"]))
+        expect(page.locator("label[for='f-bolt-thread_friction']")).to_contain_text("μG = μK")
+        expect(page.locator(".field[data-path$='.bearing_friction']")).to_have_count(0)
+
     def test_page_fits_viewport_with_compact_controls(self) -> None:
         page = self.page
         self.assertLessEqual(page.evaluate("document.documentElement.scrollHeight"), page.evaluate("innerHeight"))

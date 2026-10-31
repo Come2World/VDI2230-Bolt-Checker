@@ -20,7 +20,7 @@ from vdi2230.domain.general_inputs import (
     parse_general_input,
 )
 from vdi2230.infrastructure.general_report import render_general_report
-from vdi2230.infrastructure.general_section import MAX_VIEW, MIN_VIEW, general_section_shapes
+from vdi2230.infrastructure.general_section import MAX_VIEW, MIN_VIEW, general_section_shapes, section_target
 
 
 LOGGER = logging.getLogger(__name__)
@@ -98,7 +98,9 @@ def result_json(result: GeneralCalculationResult, width: float, height: float, c
         "warnings": list(result.warnings),
         "provisional_sources": list(result.provisional_sources),
         "metrics": asdict(result.metrics),
-        "section": {"width": width, "height": height, "shapes": [asdict(shape) for shape in shapes]},
+        "section": {"width": width, "height": height, "shapes": [
+            {**asdict(shape), "target": section_target(shape.role)} for shape in shapes
+        ]},
         "calculated_at": calculated_at,
         "report": render_general_report(result, calculated_at=calculated_at),
     })

@@ -16,11 +16,13 @@ from vdi2230 import data as engineering_data
 from vdi2230.calculations.general import GeneralCalculationResult, calculate_general
 from vdi2230.domain.general_inputs import (
     InputValidationError,
+    WASHER_ESTIMATE_SOURCE,
+    WASHER_SECTIONS,
     field_schema_json,
     parse_general_input,
 )
 from vdi2230.infrastructure.general_report import render_general_report
-from vdi2230.infrastructure.general_section import Shape
+from vdi2230.infrastructure.general_section import Shape, section_target
 
 
 DEFAULT_TITLE = "通用螺栓连接"
@@ -32,6 +34,8 @@ BOLT_MATERIAL = frozenset({
 MATERIAL_FIELDS = {
     "plates": ("youngs_modulus", "limiting_surface_pressure"),
     "tapped": ("youngs_modulus", "tensile_strength", "shear_strength"),
+    "head_washer": ("youngs_modulus", "limiting_surface_pressure"),
+    "nut_washer": ("youngs_modulus", "limiting_surface_pressure"),
 }
 INPUT_TABS = (("bolt", "螺栓"), ("plates", "板层"), ("load", "载荷"), ("assembly", "装配"))
 KEY_METRICS = (("lK", "lK"), ("Φn", "Φn"), ("FMzul", "FMzul"), ("FSmax", "FS,max"), ("FKRmin", "FKR,min"), ("MA", "MA"))
@@ -86,7 +90,7 @@ def coerce(spec: dict[str, Any], raw: Any) -> Any:
 
 
 def relevant(path: str, values: dict[str, Any]) -> bool:
-    if path.startswith("nut."):
+    if path.startswith(("nut.", "nut_washer.")):
         return values.get("joint.type") == "DSV"
     if path.startswith("tapped."):
         return values.get("joint.type") == "ESV"
@@ -111,7 +115,7 @@ def subsection_of(spec: dict[str, Any]) -> str:
             return "螺栓材料与摩擦" if spec["path"] in BOLT_MATERIAL else "螺栓几何"
         return "螺母（DSV）" if section == "nut" else "内螺纹件（ESV）"
     if group == "plates":
-        return "孔与外径"
+        return {"head_washer": "头侧垫片", "nut_washer": "螺母侧垫片（DSV）"}.get(section, "孔与外径")
     if group == "load":
         return "载荷导入系数 n" if section == "load_introduction" else "外载荷"
     return {"assembly": "拧紧", "embedding": "嵌入", "advanced": "高级选项", "requirements": "安全系数要求"}.get(section, section)
@@ -136,16 +140,18 @@ def _blend_with_white(color: str, opacity: float) -> str:
 def canvas_item(shape: Shape) -> tuple[str, tuple[float, ...], dict[str, Any]]:
     """Map a section ``Shape`` to a Tk canvas ``create_*`` call: (kind, coordinates, options)."""
     tags = (shape.role, "plate") if _PLATE_ROLE.match(shape.role) else ((shape.role,) if shape.role else ())
+    if target := section_target(shape.role):
+        tags += ("interactive", f"target:{target}")
     fill = "" if shape.fill in ("", "none") else shape.fill
-    dash = (4, 3) if shape.dash else ()
+    dash = shape.dash_pattern or ((4, 3) if shape.dash else ())
     if shape.kind == "rect":
-        return "rectangle", shape.points, {"fill": fill, "outline": shape.stroke, "dash": dash, "tags": tags}
+        return "rectangle", shape.points, {"fill": fill, "outline": shape.stroke, "dash": dash, "tags": tags, "width": shape.stroke_width}
     if shape.kind == "polygon":
         return "polygon", shape.points, {
-            "fill": _blend_with_white(fill, shape.opacity), "outline": shape.stroke, "dash": dash, "tags": tags,
+            "fill": _blend_with_white(fill, shape.opacity), "outline": shape.stroke, "dash": dash, "tags": tags, "width": shape.stroke_width,
         }
     if shape.kind == "line":
-        return "line", shape.points, {"fill": shape.stroke or "#263238", "dash": dash, "tags": tags}
+        return "line", shape.points, {"fill": shape.stroke or "#263238", "dash": dash, "tags": tags, "width": shape.stroke_width}
     if shape.kind == "text":
         return "text", shape.points[:2], {
             "text": shape.text,
@@ -227,6 +233,8 @@ class GeneralFormModel:
             spec = self.layer_specs.get(match.group(2))
             return f"板层 {int(match.group(1)) + 1} · {spec['label'] if spec else match.group(2)}"
         spec = self.specs.get(path)
+        if spec and path.split(".")[0] in WASHER_SECTIONS:
+            return f"{subsection_of(spec)} · {spec['label']}"
         return spec["label"] if spec else (path or "输入")
 
     def is_relevant(self, path: str) -> bool:
@@ -244,9 +252,21 @@ class GeneralFormModel:
             return self.apply_catalog(force=True)
         if path == "bolt.length" and self.values.get("bolt.catalog_variant_id"):
             return self.apply_catalog(force=False)
-        if path == "tapped.material_id":
-            self._apply_material(value, "tapped")
+        section, name = path.split(".")
+        if name == "material_id":
+            self._apply_material(value, section)
+        if path == "bolt.d":
+            self.refresh_washer_estimates()
         return None
+
+    def refresh_washer_estimates(self) -> None:
+        diameter = self.values.get("bolt.d")
+        if isinstance(diameter, bool) or not isinstance(diameter, (int, float)) or not math.isfinite(diameter) or diameter <= 0:
+            return
+        for spec in self.fields:
+            factor = spec["diameter_factor"]
+            if factor is not None and self.prov.get(spec["path"]) == WASHER_ESTIMATE_SOURCE:
+                self.values[spec["path"]] = round(diameter * factor, 6)
 
     def apply_catalog(self, force: bool) -> str | None:
         """Fill bolt/nut geometry from the catalog.
@@ -274,6 +294,7 @@ class GeneralFormModel:
             self.values[path] = value
             if source:
                 self.prov[path] = source
+        self.refresh_washer_estimates()
         return None
 
     def _apply_material(self, material_id: Any, kind: str, layer: Layer | None = None) -> None:
@@ -282,8 +303,8 @@ class GeneralFormModel:
             return
         for name in MATERIAL_FIELDS[kind]:
             if layer is None:
-                self.values[f"tapped.{name}"] = record[name]
-                self.prov[f"tapped.{name}"] = f"material:{material_id}"
+                self.values[f"{kind}.{name}"] = record[name]
+                self.prov[f"{kind}.{name}"] = f"material:{material_id}"
             else:
                 layer.values[name] = record[name]
                 layer.prov[name] = f"material:{material_id}"

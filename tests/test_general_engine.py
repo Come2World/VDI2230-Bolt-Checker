@@ -43,7 +43,7 @@ def b1_payload() -> dict:
         yield_strength=940.0, tensile_strength=1040.0, shear_ratio=0.62, thread_friction=0.10,
     )
     payload["tapped"].update(material_id=None, youngs_modulus=205000.0, tensile_strength=700.0, shear_strength=460.0)
-    payload["plates"] = [_layer(0, thickness=42.0, limiting_surface_pressure=1300.0, roughness_rz=16.0, bearing_friction=0.10)]
+    payload["plates"] = [_layer(0, thickness=42.0, limiting_surface_pressure=1300.0, roughness_rz=16.0)]
     payload["load"].update(axial_max=24946.2, axial_min=0.0, residual_clamp=1000.0)
     payload["load_introduction"].update(mode="manual", n=0.35)
     payload["assembly"].update(tightening_factor=1.8)
@@ -63,7 +63,7 @@ def b2_payload() -> dict:
     )
     payload["nut"].update(height=14.1, bearing_diameter=22.5)
     payload["plates"] = [
-        _layer(index, thickness=30.0, youngs_modulus=110000.0, limiting_surface_pressure=850.0, interface_friction=0.15, bearing_friction=0.12)
+        _layer(index, thickness=30.0, youngs_modulus=110000.0, limiting_surface_pressure=850.0, interface_friction=0.15)
         for index in range(2)
     ]
     payload["load"].update(axial_max=0.0, transverse=8397.93)
@@ -85,7 +85,7 @@ def b3_payload() -> dict:
     )
     payload["tapped"].update(material_id=None, tensile_strength=1000.0, shear_strength=600.0, engagement_length=18.5, outer_diameter=50.0)
     payload["plates"] = [
-        _layer(index, thickness=thickness, limiting_surface_pressure=710.0, roughness_rz=16.0, interface_friction=0.10, bearing_friction=0.10)
+        _layer(index, thickness=thickness, limiting_surface_pressure=710.0, roughness_rz=16.0, interface_friction=0.10)
         for index, thickness in enumerate((1.5, 7.0, 7.5))
     ]
     payload["load"].update(axial_max=0.0, torque=110.0, friction_radius=19.5)
@@ -157,7 +157,11 @@ class GeneralRegressionTests(unittest.TestCase):
         self.assert_close(result.value("FMzul"), reference(source, "FMzul"), "B3 FMzul")
         self.assert_close(result.check("SG").value, reference(source, "SG"), "B3 SG")
         self.assert_close(result.check("Sp,K").value, reference(source, "Sp"), "B3 Sp")
-        self.assert_close(result.value("MA"), reference(source, "MA"), "B3 MA")
+        # B3 uses muK=0.10, muG=0.12; the new shared-friction assumption intentionally changes MA.
+        torque_increase = result.value("FMzul") * result.value("DKm") / 2 * (0.12 - 0.10) / 1000
+        self.assert_close(result.value("MA") - torque_increase, reference(source, "MA"), "B3 MA with original muK")
+        self.assertAlmostEqual(result.value("μK"), 0.12)
+        self.assertGreater(result.value("MA"), reference(source, "MA") * 1.03)
         self.assert_close(result.value("A0"), reference(source, "A0"), "B3 A0")
         self.assert_close(result.value("δS"), reference(source, "dS"), "B3 δS")
         self.assert_close(result.value("δP"), reference(source, "dP"), "B3 δP")

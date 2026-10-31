@@ -230,7 +230,7 @@ details.group > summary {
 }
 .section-stale[hidden] { display: none; }
 #section > * { pointer-events: none; }
-#section > [data-role^="plate-"] { pointer-events: auto; cursor: pointer; }
+#section > :is(rect, polygon, text)[data-target] { pointer-events: auto; cursor: pointer; }
 #section rect.selected { stroke: var(--accent); stroke-width: 2; }
 #section text.selected { fill: var(--accent); font-weight: 600; }
 .metrics {
