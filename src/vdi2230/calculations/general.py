@@ -54,6 +54,9 @@ class SectionMetrics:
     limiting_diameter: float
     w: int
     critical_diameter: float
+    cone_start_head: float
+    cone_start_nut: float
+    cone_kind: str
 
 
 @dataclass(frozen=True)
@@ -145,6 +148,42 @@ def _cone_tangent(kind: str, beta: float, y: float) -> float:
     return 0.348 + 0.013 * math.log(beta) + 0.193 * math.log(y)
 
 
+def deformation_diameter(
+    position: float,
+    clamp: float,
+    outer: float,
+    w: int,
+    tan_phi: float,
+    start_head: float,
+    start_nut: float,
+) -> float:
+    """Outer diameter of the deformation body at depth ``position`` below the head."""
+    if w == 2 or position <= clamp / 2:
+        raw = start_head + 2 * position * tan_phi
+    else:
+        raw = start_nut + 2 * (clamp - position) * tan_phi
+    return min(raw, outer)
+
+
+def deformation_breakpoints(
+    clamp: float,
+    outer: float,
+    w: int,
+    tan_phi: float,
+    start_head: float,
+    start_nut: float,
+) -> tuple[float, ...]:
+    """Depths where the deformation-body outline changes slope (cone apex, cone/sleeve)."""
+    points = {0.0, clamp}
+    if w == 1:
+        points.add(clamp / 2)
+    if outer > start_head:
+        points.add((outer - start_head) / (2 * tan_phi))
+    if w == 1 and outer > start_nut:
+        points.add(clamp - (outer - start_nut) / (2 * tan_phi))
+    return tuple(sorted(point for point in points if 0 <= point <= clamp))
+
+
 def _plate_compliance(
     item: GeneralInput,
     w: int,
@@ -158,22 +197,12 @@ def _plate_compliance(
     outer = item.joint.outer_diameter
 
     def diameter(position: float) -> float:
-        if w == 2 or position <= clamp / 2:
-            raw = start_head + 2 * position * tan_phi
-        else:
-            raw = start_nut + 2 * (clamp - position) * tan_phi
-        return min(raw, outer)
+        return deformation_diameter(position, clamp, outer, w, tan_phi, start_head, start_nut)
 
-    points = {0.0, clamp}
-    if w == 1:
-        points.add(clamp / 2)
-    if outer > start_head:
-        points.add((outer - start_head) / (2 * tan_phi))
-    if w == 1 and outer > start_nut:
-        points.add(clamp - (outer - start_nut) / (2 * tan_phi))
     boundaries = [0.0]
     for layer in item.plates:
         boundaries.append(boundaries[-1] + layer.thickness)
+    points = set(deformation_breakpoints(clamp, outer, w, tan_phi, start_head, start_nut))
     points.update(boundaries)
     ordered = sorted(point for point in points if 0 <= point <= clamp)
 
@@ -472,6 +501,9 @@ def calculate_general(item: GeneralInput) -> GeneralCalculationResult:
         limiting_diameter=limiting,
         w=w,
         critical_diameter=d0,
+        cone_start_head=start_head,
+        cone_start_nut=start_nut,
+        cone_kind=cone_kind,
     )
     return GeneralCalculationResult(
         input=item,
