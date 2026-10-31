@@ -2,10 +2,10 @@
 
 | 项目 | 内容 |
 |---|---|
-| 文档版本 | 0.5 |
+| 文档版本 | 0.6 |
 | 日期 | 2026-10-31 |
-| 对应需求 | [软件需求规格说明书](./SOFTWARE_REQUIREMENTS_SPECIFICATION.md) v0.9 |
-| 当前状态 | 第一阶段为固定 B1–B5 参考算例验证器；参数化设计计算尚未实现 |
+| 对应需求 | [软件需求规格说明书](./SOFTWARE_REQUIREMENTS_SPECIFICATION.md) v1.0 |
+| 当前状态 | B1–B5 参考算例验证器 + 同心单螺栓通用参数化计算（网页与桌面）；随附数据待核验 |
 
 ## 1. 目标与范围
 
@@ -13,7 +13,7 @@
 
 本方案不包含三维模型、有限元分析、云端服务，也不承诺支持 B1–B5 以外的任意 VDI 2230 工况。五种工况使用独立、显式选择的计算模型，超范围输入必须阻断完整结论。本文档不替代正式标准核验；尚未核实的公式、表格或算例不得直接作为实现依据。
 
-当前计算函数按 PDF 中固定的算例输入重新计算，并不接收用户设计参数。第一阶段 UI 因此只读展示参考输入，明确标注固定算例模式；参数化输入驱动计算是后续独立阶段，完成前不能将本应用描述为通用设计计算器。
+参考算例计算函数按 PDF 中固定的算例输入重新计算，UI 只读展示参考输入。通用参数化计算使用独立的输入模型与计算编排（见 2.2），由用户输入驱动；其结果在随附数据完成主标准核验前统一标记“需确认 · 数据待核验”。
 
 ## 2. 架构决策建议
 
@@ -30,16 +30,38 @@
 | 浏览器测试 | 可选 Playwright + `unittest` | 实际运行 Chromium；校验 12 项安全系数误差、响应顺序、下载和布局 |
 | 构建/打包 | `pyproject.toml` 管理项目；PyInstaller 作为首选打包验证方案 | 先形成可重复的开发环境，再分别产出 macOS 与 Windows 应用 |
 
-桌面版采用单进程、分层模块化架构；网页版使用一个本地 Python HTTP 服务进程配合浏览器，不引入 Electron、Qt、数据库或插件系统。板层等几何对象由独立数据模型管理；后续参数化阶段可通过表单控件增删/编辑后重绘 Canvas/SVG，当前固定参考模式不开放修改。
+桌面版采用单进程、分层模块化架构；网页版使用一个本地 Python HTTP 服务进程配合浏览器，不引入 Electron、Qt、数据库或插件系统。板层等几何对象由独立数据模型管理；通用模式通过表单控件或点击剖面增删/编辑后重绘 Canvas/SVG，固定参考模式不开放修改。
 
 ### 2.1 网页实现边界
 
 - 入口：`python -m vdi2230.web` 或 `vdi2230-web`，默认 `127.0.0.1:8765`。
 - `ui/forms.py` 存放不依赖 Tkinter 的共享表单/算例定义，`ui/reference_cases.py` 提供两端共用的固定输入校验与几何映射；网页启动不导入 Tkinter。
-- `web/server.py` 只提供明确列出的静态资源和参考算例 API：`GET /api/cases`、`GET /api/cases/{id}`、`POST /api/cases/{id}/calculate`。请求必须匹配固定输入；响应包含完整计算结果、单列安全系数及由同一结果生成的 TXT。
+- `web/server.py` 只提供明确列出的静态资源和 API。页面：`/`（通用计算：`index.html`、`app.js`、`styles.css`）和 `/reference`（参考验证器：`reference.html`、`reference.js`、`reference.css`）。
+- 参考算例 API：`GET /api/cases`、`GET /api/cases/{id}`、`POST /api/cases/{id}/calculate`。请求必须匹配固定输入；响应包含完整计算结果、单列安全系数及由同一结果生成的 TXT。
+- 通用计算 API（`web/general_api.py`）：`GET /api/general/schema`、`GET /api/general/catalog`、`GET /api/general/catalog-values?variant=…&length=…&class=…`、`POST /api/general/calculate`。输入错误返回 400 及 `field_errors[{path, message}]`；响应经 `_json_safe` 把非有限浮点数转为 `null`。
 - 浏览器按请求序号丢弃过期响应，不在服务端保存用户会话；下载本次计算返回的报告，不重新计算或混入其他实例结果。
 - 资源作为 Python 包数据分发。运行时无第三方依赖；浏览器测试依赖通过 `ui-test` 可选依赖安装。
-- HTTP 测试位于 `tests/test_web_ui.py`，真实浏览器测试位于 `tests/browser/`，VS Code 任务配置提供启动与测试命令。
+- HTTP 测试位于 `tests/test_web_ui.py` 与 `tests/test_web_general_api.py`，真实浏览器测试位于 `tests/browser/`，VS Code 任务配置提供启动与测试命令。
+
+### 2.2 通用计算模式
+
+```text
+domain/general_inputs.py      字段模式（schema）、默认值、GeneralInput 解析与逐字段校验
+calculations/general.py       同心单螺栓 VDI 2230 计算编排 → GeneralCalculationResult（checks、verdict、来源）
+infrastructure/general_section.py  由输入与指标生成与工具包无关的 Shape 图元（SVG/Canvas 共用）
+infrastructure/general_report.py   UTF-8 纯文本报告
+data/                         螺栓目录、强度等级、材料表（A9）及 VDI 表格；记录来源与核验状态
+web/general_api.py + static/app.js   网页紧凑三栏界面
+ui/general_model.py           不依赖 Tk 的桌面表单状态：目录/材料填充、板层增删移、来源追踪、计算结果封装
+ui/general_window.py          Tkinter 三栏窗口（ttk.Notebook 输入、Canvas 剖面、Treeview 结果）
+```
+
+- **单一计算路径：** 网页与桌面都把表单状态转换为同一 JSON 输入（含 `provenance`），经 `parse_general_input` → `calculate_general` → `render_general_report`，避免两端结果不一致。
+- **来源追踪：** 每个字段的来源为 `catalog:<variant>`、`class:<等级>`、`material:<材料>`、`table:<表>` 或用户输入；用户修改即清除来源。长度变化只刷新仍为目录来源的值，用户覆盖值保留。
+- **判定（按优先级）：** 任一适用校核不通过 →“不通过”；否则存在需确认的校核或待核验数据来源 →“需确认 · 数据待核验”；其余 →“通过”。
+- **剖面交互：** 板层图元带 `plate-<i>` 角色（SVG `data-role`、Canvas tag），点击即选中对应板层；输入有误时保留上次有效剖面并叠加“剖面未更新”提示。
+- **桌面入口：** `vdi2230` 打开 `GeneralWindow`；`vdi2230 --reference` 打开参考验证器 `MainWindow`（也可从通用窗口以 `Toplevel` 打开）。
+- **测试：** `tests/test_general_inputs.py`、`test_general_engine.py`（含 B1–B3 回归）、`test_general_section.py`、`test_general_report.py`、`test_general_desktop_model.py`、`test_general_desktop_window.py`（无显示环境时自动跳过）、`tests/browser/test_general_browser.py`。
 
 ## 3. 总体结构
 
