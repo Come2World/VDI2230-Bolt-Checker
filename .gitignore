@@ -1,2 +1,5 @@
 /REFERENCE/
 /.vscode/settings.json
+.DS_Store
+__pycache__/
+*.py[cod]
