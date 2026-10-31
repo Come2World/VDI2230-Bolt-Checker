@@ -7,7 +7,7 @@ const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selec
 const CATALOG_PATHS = new Set(["bolt.catalog_variant_id", "bolt.property_class"]);
 const BOLT_MATERIAL = new Set([
   "bolt.youngs_modulus", "bolt.yield_strength", "bolt.tensile_strength", "bolt.tensile_strength_max",
-  "bolt.shear_ratio", "bolt.rolling", "bolt.thread_friction",
+  "bolt.shear_ratio", "bolt.rolling", "bolt.thread_friction", "bolt.bearing_friction",
 ]);
 const MATERIAL_FIELDS = {
   plates: ["youngs_modulus", "limiting_surface_pressure"],

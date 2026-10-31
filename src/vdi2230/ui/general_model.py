@@ -22,14 +22,14 @@ from vdi2230.domain.general_inputs import (
     parse_general_input,
 )
 from vdi2230.infrastructure.general_report import render_general_report
-from vdi2230.infrastructure.general_section import Shape, section_target
+from vdi2230.infrastructure.general_section import TEXT_FILL, Shape, section_target
 
 
 DEFAULT_TITLE = "通用螺栓连接"
 CATALOG_PATHS = ("bolt.catalog_variant_id", "bolt.property_class")
 BOLT_MATERIAL = frozenset({
     "bolt.youngs_modulus", "bolt.yield_strength", "bolt.tensile_strength", "bolt.tensile_strength_max",
-    "bolt.shear_ratio", "bolt.rolling", "bolt.thread_friction",
+    "bolt.shear_ratio", "bolt.rolling", "bolt.thread_friction", "bolt.bearing_friction",
 })
 MATERIAL_FIELDS = {
     "plates": ("youngs_modulus", "limiting_surface_pressure"),
@@ -129,14 +129,6 @@ def plate_index(tags: tuple[str, ...] | list[str]) -> int | None:
     return None
 
 
-def _blend_with_white(color: str, opacity: float) -> str:
-    """Tk canvases have no alpha; approximate a translucent fill on a white background."""
-    if not re.fullmatch(r"#[0-9a-fA-F]{6}", color) or opacity >= 1:
-        return color
-    channels = (int(color[i:i + 2], 16) for i in (1, 3, 5))
-    return "#" + "".join(f"{round(c * opacity + 255 * (1 - opacity)):02x}" for c in channels)
-
-
 def canvas_item(shape: Shape) -> tuple[str, tuple[float, ...], dict[str, Any]]:
     """Map a section ``Shape`` to a Tk canvas ``create_*`` call: (kind, coordinates, options)."""
     tags = (shape.role, "plate") if _PLATE_ROLE.match(shape.role) else ((shape.role,) if shape.role else ())
@@ -147,15 +139,16 @@ def canvas_item(shape: Shape) -> tuple[str, tuple[float, ...], dict[str, Any]]:
     if shape.kind == "rect":
         return "rectangle", shape.points, {"fill": fill, "outline": shape.stroke, "dash": dash, "tags": tags, "width": shape.stroke_width}
     if shape.kind == "polygon":
+        # Canvas has no alpha compositing: leave translucent overlays unfilled, not opaque pastel.
         return "polygon", shape.points, {
-            "fill": _blend_with_white(fill, shape.opacity), "outline": shape.stroke, "dash": dash, "tags": tags, "width": shape.stroke_width,
+            "fill": fill if shape.opacity >= 1 else "", "outline": shape.stroke, "dash": dash, "tags": tags, "width": shape.stroke_width,
         }
     if shape.kind == "line":
-        return "line", shape.points, {"fill": shape.stroke or "#263238", "dash": dash, "tags": tags, "width": shape.stroke_width}
+        return "line", shape.points, {"fill": shape.stroke or TEXT_FILL, "dash": dash, "tags": tags, "width": shape.stroke_width}
     if shape.kind == "text":
         return "text", shape.points[:2], {
             "text": shape.text,
-            "fill": fill or "#263238",
+            "fill": fill or TEXT_FILL,
             "anchor": TEXT_ANCHORS.get(shape.anchor, "w"),
             "font": ("Helvetica", -max(8, round(shape.size))),
             "angle": -shape.rotate,

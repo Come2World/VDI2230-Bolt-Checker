@@ -20,8 +20,9 @@ not replace the standard, engineering judgment, or design review.
 
 ### Ownership of inputs
 
-Thread friction μG and bearing friction μK belong to the bolt: **μK = μG**
-is enforced through one editable value. Thickness, material, roughness Rz and
+Thread friction μG and bearing friction μK belong to the bolt and are
+**independently editable**; changing one never changes the other. μK applies
+to the rotating head/nut bearing contact. Thickness, material, roughness Rz and
 interface friction μT belong to each plate layer,
 ordered from the bolt head. Bolt data are chosen from the hex-bolt catalog
 (ISO 4014/4017, M6–M30, 8.8/10.9/12.9) first; any catalog value can be
@@ -62,10 +63,9 @@ not a claim about the grade of any purchased washer.
 
 Regression against the source (same inputs as B1–B3): B1 SF +0.45 %,
 Sp −0.18 %, MA +0.88 %; B2 SG +0.32 %, Sp −0.28 %, SA 0.00 %, MA +0.56 %;
-B3 SG/Sp/FMzul 0.00 %. **B3 MA is now +8.63 %** (566.100 vs. 521.135 N·m):
-the new μK = μG = 0.12 assumption differs from the example's μK = 0.10.
-This intentional torque change is tested separately, not represented as a
-safety-factor regression failure. The fixed reference verifier is unchanged.
+B3 SG/Sp/FMzul/MA 0.00 %. **B3 uses μG = 0.12 and μK = 0.10**, reproducing
+the source tightening torque of **521.135 N·m**. No shared-friction assumption
+or special torque correction is used. The fixed reference verifier is unchanged.
 The B1 Φ difference comes from the source mixing
 w = 1 geometry with δPzu = δM; B3 R11 in the source uses FMzul and 1.2·P.
 
@@ -102,8 +102,12 @@ a production or shared-network service.
 The general page is a compact single-viewport layout (12 px text, 24 px
 controls; fits 1280×720 without page scrolling; stacks below 1080 px width):
 
+- **Cyberpunk theme** – deep navy surfaces, cyan input/geometry accents,
+  purple results accents, subtle neon panel borders and a drawing grid.
+  Pass/fail/review retain distinct green/red/amber colors and text labels.
+  Main text, muted text and status color pairs meet a 4.5:1 contrast threshold.
 - **Left** – inputs in four tabs (螺栓 / 板层 / 载荷 / 装配). Catalog and
-  material values are marked (blue = catalog, amber = provisional source);
+  material values are marked (cyan = catalog, amber = provisional source);
   irrelevant fields (nut vs. tapped part, table vs. manual modes) are hidden.
 - **Center** – engineering-style SVG section: chamfered hex-head/nut profiles
   with curved face projections, unhatched bolt, fine thread-root lines,
@@ -118,6 +122,13 @@ controls; fits 1280×720 without page scrolling; stacks below 1080 px width):
 Calculation runs automatically 300 ms after an edit. Invalid fields are
 listed and marked on their tab; the last valid section stays visible with a
 "剖面未更新" overlay and export is disabled until the input is fixed.
+
+The Tk general window uses the same dark palette with the standard-library
+`clam` ttk theme, including entries, dropdowns, lists, report text and status
+messages. The SVG compression-cone fill opacity is **6 %**. Tk Canvas has no
+true alpha compositing, so the cone uses a **transparent, unfilled dashed
+outline**, not a light-colored opaque substitute. Plate colors and hatching
+remain visible. These rendering choices do not change any calculation.
 
 On `/reference`, select B1–B5 and click **计算**. The right column shows each available safety
 factor's PDF reference, calculated value and relative error, expandable full
@@ -152,7 +163,8 @@ installation, run the same `python -m unittest ...` commands without `PYTHONPATH
 Browser tests start their own local server on an available port, launch Chromium,
 and clean up both. For the general page they cover the single-viewport layout,
 catalog selection, washer estimates/overrides, part clicks and field focus,
-shared bolt friction, layer add/select via the section, field errors, stale
+independent bolt friction, dark-theme contrast, transparent Tk cones,
+layer add/select via the section, field errors, stale
 responses and TXT export; for `/reference` they cover all five cases and 12
 safety-factor comparisons, read-only inputs, result invalidation, error/retry,
 out-of-order responses, UTF-8 report downloads, and desktop/narrow layouts.
@@ -178,9 +190,10 @@ The general API (`GET /api/general/schema`, `GET /api/general/catalog`,
 `GET /api/general/catalog-values?variant=…&length=…&class=…`,
 `POST /api/general/calculate`) returns field-level errors as
 `{"field_errors": [{"path", "message"}]}`.
-The input schema is now `vdi2230.general/2`, adding `head_washer` and
-`nut_washer` objects and removing `plates[].bearing_friction`. Only
-`bolt.thread_friction` is submitted; μK is derived. Version 1 and legacy
-bearing-friction fields are explicitly rejected to prevent silent changes to
-old calculations. Restart running Python processes and reload the web page
-after updating.
+The input schema is now `vdi2230.general/3`. Submit independent
+`bolt.thread_friction` and `bolt.bearing_friction` values; both default to 0.12
+but are not linked. `head_washer` and `nut_washer` objects are retained.
+Versions 1/2 and `plates[].bearing_friction` are explicitly rejected: older
+inputs must be reviewed and both bolt friction values confirmed, rather than
+silently changing an old calculation. Restart running Python processes and
+reload the web page after updating.

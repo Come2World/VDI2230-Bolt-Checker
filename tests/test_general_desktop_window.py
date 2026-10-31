@@ -1,5 +1,6 @@
 import tempfile
 import tkinter as tk
+from tkinter import ttk
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -7,7 +8,8 @@ from unittest import mock
 
 from vdi2230 import __main__ as entry
 from vdi2230.ui.general_model import entry_text
-from vdi2230.ui.general_window import ACCENT, WINDOW_MIN_SIZE, WINDOW_SIZE, GeneralWindow, fit_window
+from vdi2230.infrastructure.general_section import DRAWING_BACKGROUND, PLATE_FILLS, TEXT_FILL
+from vdi2230.ui.general_window import ACCENT, INPUT_BACKGROUND, PANEL, WINDOW_MIN_SIZE, WINDOW_SIZE, GeneralWindow, fit_window
 
 
 class FitWindowTests(unittest.TestCase):
@@ -231,7 +233,7 @@ class GeneralWindowTests(unittest.TestCase):
             self.assertGreaterEqual(top, 0)
             self.assertLess(top + widget.winfo_height(), scroller.canvas.winfo_height())
 
-    def test_washer_errors_point_to_plate_page_and_bolt_friction_is_shared(self):
+    def test_washer_errors_point_to_plate_page_and_bolt_frictions_are_independent(self):
         window = self.window
         window._vars["head_washer.enabled"].set(True)
         window._vars["head_washer.inner_diameter"].set("20")
@@ -240,11 +242,39 @@ class GeneralWindowTests(unittest.TestCase):
         window.go_to_field("head_washer.inner_diameter")
         self.assertEqual(window.input_tabs.index("current"), window._tab_index["plates"])
         window._vars["head_washer.inner_diameter"].set("13.2")
+        window._vars["bolt.bearing_friction"].set("0.10")
         window._vars["bolt.thread_friction"].set("0.18")
         outcome = window.calculate_now()
         self.assertTrue(outcome.ok)
-        self.assertEqual(outcome.result.value("μK"), 0.18)
+        self.assertEqual(outcome.result.value("μK"), 0.10)
+        self.assertEqual(window._vars["bolt.bearing_friction"].get(), "0.10")
         self.assertNotIn("plates[0].bearing_friction", window._vars)
+
+    def test_cyberpunk_theme_covers_native_and_ttk_widgets(self):
+        window = self.window
+        style = ttk.Style(self.root)
+        self.assertEqual(style.theme_use(), "clam")
+        self.assertEqual(style.lookup("TEntry", "fieldbackground"), INPUT_BACKGROUND)
+        self.assertEqual(style.lookup("TCombobox", "fieldbackground", ("readonly",)), INPUT_BACKGROUND)
+        self.assertEqual(style.lookup("TFrame", "background"), PANEL)
+        self.assertEqual(window.canvas.cget("background"), DRAWING_BACKGROUND)
+        self.assertEqual(window.report_text.cget("background"), INPUT_BACKGROUND)
+        self.assertEqual(window.report_text.cget("foreground"), TEXT_FILL)
+        self.assertEqual(window.layer_list.cget("background"), INPUT_BACKGROUND)
+        self.assertEqual(window._rows["bolt.d"][2].cget("background"), PANEL)
+
+    def test_compression_cone_is_transparent_and_plate_fill_is_preserved(self):
+        window = self.window
+        cones = window.canvas.find_withtag("cone")
+        self.assertEqual(len(cones), 2)
+        for cone in cones:
+            self.assertEqual(window.canvas.itemcget(cone, "fill"), "")
+            self.assertTrue(window.canvas.itemcget(cone, "outline"))
+            self.assertTrue(window.canvas.itemcget(cone, "dash"))
+        plates = [item for item in window.canvas.find_withtag("plate-0") if window.canvas.type(item) == "rectangle"]
+        self.assertEqual(len(plates), 2)
+        self.assertTrue(all(window.canvas.itemcget(item, "fill") == PLATE_FILLS[0] for item in plates))
+        self.assertTrue(window.canvas.find_withtag("grid"))
 
     def test_layer_selection_highlights_plate_and_reveals_tab(self):
         window = self.window

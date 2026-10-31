@@ -155,8 +155,19 @@ class GeneralSchemaTests(unittest.TestCase):
         self.assertNotIn("bearing_friction", names)
         bolt_paths = {spec.path for spec in FIELD_SPECS if spec.path.startswith("bolt.")}
         self.assertIn("bolt.thread_friction", bolt_paths)
-        item = parse_general_input(default_input_json())
-        self.assertEqual(item.bolt.bearing_friction, item.bolt.thread_friction)
+        self.assertIn("bolt.bearing_friction", bolt_paths)
+        payload = default_input_json()
+        payload["bolt"].update(thread_friction=0.12, bearing_friction=0.10)
+        item = parse_general_input(payload)
+        self.assertEqual(item.bolt.bearing_friction, 0.10)
+        self.assertEqual(item.bolt.thread_friction, 0.12)
+        self.assertEqual(parse_general_input(item.to_json()), item)
+
+    def test_bearing_friction_validates_independently(self):
+        for invalid in (0, 2, float("nan"), True, "abc"):
+            payload = default_input_json()
+            payload["bolt"]["bearing_friction"] = invalid
+            self.assertIn("bolt.bearing_friction", error_paths(payload))
 
 
 class ProvenanceTests(unittest.TestCase):

@@ -20,17 +20,19 @@ from vdi2230.domain.general_inputs import GeneralInput
 MIN_VIEW = 200
 MAX_VIEW = 2400
 LINE_HEIGHT = 13.0
-PLATE_FILLS = ("#f1f4f7", "#e6ebf0")
-PLATE_STROKE = "#5b7083"
-BOLT_FILL = "#d5e6f5"
+DRAWING_BACKGROUND = "#04101f"
+GRID_STROKE = "#0b253b"
+PLATE_FILLS = ("#0a2940", "#10243d")
+PLATE_STROKE = "#61cfff"
+BOLT_FILL = "#07334c"
 THREAD_FILL = BOLT_FILL
-BOLT_STROKE = "#2f3e4c"
-TAPPED_FILL = "#e6dfd1"
-CONE_FILL = "#f2a541"
-INTERFACE_STROKE = "#c0392b"
-DIMENSION_STROKE = "#455a64"
-TEXT_FILL = "#263238"
-MUTED_TEXT = "#607d8b"
+BOLT_STROKE = "#66e3ff"
+TAPPED_FILL = "#172749"
+CONE_FILL = "#be85ff"
+INTERFACE_STROKE = "#dc8aff"
+DIMENSION_STROKE = "#83def5"
+TEXT_FILL = "#d6efff"
+MUTED_TEXT = "#89abc5"
 
 
 @dataclass(frozen=True)
@@ -72,7 +74,7 @@ def _hatched_rect(x0: float, top: float, x1: float, bottom: float, fill: str, ro
         if reverse:
             start_y, end_y = height - start_y, height - end_y
         shapes.append(Shape("line", (x0 + start_x, top + start_y, x0 + end_x, top + end_y),
-                            stroke="#a6afb9", role=role, stroke_width=0.7))
+                            stroke="#298fb5", role=role, stroke_width=0.7))
         offset += 8.0
     return shapes
 
@@ -143,7 +145,11 @@ def general_section_shapes(
     def half(diameter: float) -> float:
         return diameter * scale / 2
 
-    shapes: list[Shape] = []
+    shapes: list[Shape] = [Shape("rect", (0.0, 0.0, width, height), fill=DRAWING_BACKGROUND, role="background")]
+    for x in range(24, int(width), 24):
+        shapes.append(Shape("line", (x, 0.0, x, height), stroke=GRID_STROKE, role="grid", stroke_width=0.5))
+    for level in range(24, int(height), 24):
+        shapes.append(Shape("line", (0.0, level, width, level), stroke=GRID_STROKE, role="grid", stroke_width=0.5))
     hatching: list[Shape] = []
     y_end = y(below)
 
@@ -173,7 +179,7 @@ def general_section_shapes(
             top = 0.0 if side == "head" else clamp - washer.thickness
             for sign in (-1, 1):
                 x0, x1 = sorted((cx + sign * half(washer.inner_diameter), cx + sign * half(washer.outer_diameter)))
-                shapes.extend(_hatched_rect(x0, y(top), x1, y(top + washer.thickness), "#d1d8df", f"washer-{side}"))
+                shapes.extend(_hatched_rect(x0, y(top), x1, y(top + washer.thickness), "#173c55", f"washer-{side}"))
 
     slip_interfaces = range(1, len(item.plates)) if dsv else range(1, len(item.plates) + 1)
     for boundary_index in slip_interfaces:
@@ -201,7 +207,7 @@ def general_section_shapes(
             outline.extend((cx + side * half(diameter), y(depth + item.head_washer_thickness)))
         polygon = (cx + side * half(joint.hole_diameter), y(boundaries[0]), *outline,
                    cx + side * half(joint.hole_diameter), y(boundaries[-1]))
-        shapes.append(Shape("polygon", polygon, fill=CONE_FILL, stroke="#b9770e", dash=True, role="cone", opacity=0.12))
+        shapes.append(Shape("polygon", polygon, fill=CONE_FILL, stroke=CONE_FILL, dash=True, role="cone", opacity=0.06))
     shapes.extend(hatching)
 
     if bolt.head_type == "hex":
@@ -213,7 +219,7 @@ def general_section_shapes(
         ))
         shapes.append(Shape(
             "rect", (cx - half(0.8 * bolt.d), y_top, cx + half(0.8 * bolt.d), y_top + 0.5 * bolt.head_height * scale),
-            fill="#ffffff", stroke=BOLT_STROKE, role="bolt-head",
+            fill=DRAWING_BACKGROUND, stroke=BOLT_STROKE, role="bolt-head",
         ))
 
     shank_end = min(max(shank_total, 0.0), bolt.length)
@@ -241,7 +247,7 @@ def general_section_shapes(
     if bolt.bore_diameter > 0:
         shapes.append(Shape(
             "rect", (cx - half(bolt.bore_diameter), y_top, cx + half(bolt.bore_diameter), y(bolt.length)),
-            fill="#ffffff", stroke=BOLT_STROKE, role="bolt-bore",
+            fill=DRAWING_BACKGROUND, stroke=BOLT_STROKE, role="bolt-bore",
         ))
 
     if dsv:
@@ -324,7 +330,7 @@ def _labels(item, metrics, cx, y, half, head_width, nut_width, label_x, top_limi
     bolt, nut, tapped = item.bolt, item.nut, item.tapped
     dsv = item.is_through_bolt
     layers = item.plates
-    head_mu = f"μK = μG {_fmt(bolt.thread_friction)}"
+    head_mu = f"μK {_fmt(bolt.bearing_friction)} · μG {_fmt(bolt.thread_friction)}"
     # (anchor y, anchor x, title, detail, short name, role)
     entries: list[tuple[float, float, str, str, str, str]] = [(
         (y_top + y(0.0)) / 2,
@@ -386,11 +392,11 @@ def _labels(item, metrics, cx, y, half, head_width, nut_width, label_x, top_limi
     for (anchor_y, anchor_x, title, detail, short, role), top in zip(entries, placed):
         if step == two_line:
             centre = top + LINE_HEIGHT
-            shapes.append(Shape("line", (anchor_x + 2, anchor_y, label_x - 4, centre), stroke="#90a4ae", role=role))
+            shapes.append(Shape("line", (anchor_x + 2, anchor_y, label_x - 4, centre), stroke=MUTED_TEXT, role=role))
             shapes.append(Shape("text", (label_x, top + LINE_HEIGHT / 2), fill=TEXT_FILL, text=title, role=role))
             shapes.append(Shape("text", (label_x, top + 1.5 * LINE_HEIGHT), fill=MUTED_TEXT, text=detail, role=role, size=10.5))
         else:
             centre = top + step / 2
-            shapes.append(Shape("line", (anchor_x + 2, anchor_y, label_x - 4, centre), stroke="#90a4ae", role=role))
+            shapes.append(Shape("line", (anchor_x + 2, anchor_y, label_x - 4, centre), stroke=MUTED_TEXT, role=role))
             shapes.append(Shape("text", (label_x, centre), fill=TEXT_FILL, text=f"{short} · {detail}", role=role, size=size))
     return shapes

@@ -14,7 +14,9 @@ from tkinter import filedialog, messagebox, ttk
 from tkinter import font as tkfont
 from typing import Any, Callable
 
-from vdi2230.infrastructure.general_section import MAX_VIEW, MIN_VIEW, general_section_shapes
+from vdi2230.infrastructure.general_section import (
+    DRAWING_BACKGROUND, MAX_VIEW, MIN_VIEW, MUTED_TEXT, PLATE_STROKE, TEXT_FILL, general_section_shapes,
+)
 from vdi2230.ui.general_model import (
     CATALOG_PATHS,
     INPUT_TABS,
@@ -30,10 +32,15 @@ from vdi2230.ui.general_model import (
 )
 
 
-ACCENT = "#1f6feb"
-STATUS_COLORS = {"通过": ("#1a7f37", "#e6f4ea"), "不通过": ("#c62828", "#fdecea"), "需确认": ("#9a6700", "#fff4d6")}
-NEUTRAL_COLORS = ("#64748b", "#eef1f4")
-MARKERS = {"catalog": ("●", "#1f6feb"), "provisional": ("●", "#d4a017"), "error": ("✕", "#c62828")}
+ACCENT = "#00d9ff"
+PURPLE = "#bd83ff"
+PANEL = "#071525"
+INPUT_BACKGROUND = "#06101f"
+BORDER = "#205572"
+SELECT_BACKGROUND = "#123d56"
+STATUS_COLORS = {"通过": ("#28e6b3", "#073529"), "不通过": ("#ff718c", "#391528"), "需确认": ("#ffd078", "#302616")}
+NEUTRAL_COLORS = (MUTED_TEXT, "#102437")
+MARKERS = {"catalog": ("●", ACCENT), "provisional": ("●", STATUS_COLORS["需确认"][0]), "error": ("✕", STATUS_COLORS["不通过"][0])}
 CALC_DELAY_MS = 300
 PANE_SPLIT = (0.30, 0.68)
 WINDOW_SIZE = (1440, 860)
@@ -68,7 +75,7 @@ class ScrollFrame(ttk.Frame):
 
     def __init__(self, master: tk.Misc) -> None:
         super().__init__(master)
-        self.canvas = tk.Canvas(self, highlightthickness=0, borderwidth=0)
+        self.canvas = tk.Canvas(self, background=PANEL, highlightthickness=0, borderwidth=0)
         bar = ttk.Scrollbar(self, orient=tk.VERTICAL, command=self.canvas.yview)
         self.body = ttk.Frame(self.canvas, padding=(4, 2))
         window = self.canvas.create_window(0, 0, window=self.body, anchor=tk.NW)
@@ -122,11 +129,44 @@ class GeneralWindow:
             "section": tkfont.Font(root=self.root, family=base.actual("family"), size=11, weight="bold"),
         }
         style = ttk.Style(self.root)
-        style.configure("Treeview", rowheight=20)
-        style.configure("Head.TLabel", font=self._fonts["head"])
-        style.configure("Section.TLabel", foreground="#475569", font=self._fonts["section"])
-        style.configure("Muted.TLabel", foreground="#64748b")
-        style.configure("Unit.TLabel", foreground="#94a3b8")
+        style.theme_use("clam")
+        self.root.configure(background="#030a17")
+        style.configure(".", background=PANEL, foreground=TEXT_FILL, bordercolor=BORDER,
+                        darkcolor=PANEL, lightcolor=BORDER, troughcolor=INPUT_BACKGROUND)
+        style.configure("Cyber.TFrame", borderwidth=1, relief="solid")
+        style.configure("TEntry", fieldbackground=INPUT_BACKGROUND, foreground=TEXT_FILL,
+                        insertcolor=ACCENT, padding=(4, 2))
+        style.map("TEntry", bordercolor=[("focus", ACCENT)])
+        style.configure("TCombobox", fieldbackground=INPUT_BACKGROUND, background=INPUT_BACKGROUND,
+                        foreground=TEXT_FILL, arrowcolor=ACCENT, padding=(4, 2))
+        style.map("TCombobox", fieldbackground=[("readonly", INPUT_BACKGROUND)],
+                  foreground=[("readonly", TEXT_FILL)], bordercolor=[("focus", ACCENT)],
+                  selectbackground=[("readonly", SELECT_BACKGROUND)], selectforeground=[("readonly", TEXT_FILL)])
+        self.root.option_add("*TCombobox*Listbox.background", INPUT_BACKGROUND)
+        self.root.option_add("*TCombobox*Listbox.foreground", TEXT_FILL)
+        self.root.option_add("*TCombobox*Listbox.selectBackground", SELECT_BACKGROUND)
+        self.root.option_add("*TCombobox*Listbox.selectForeground", TEXT_FILL)
+        style.configure("TButton", background="#102c43", padding=(6, 3))
+        style.map("TButton", background=[("active", SELECT_BACKGROUND)], foreground=[("disabled", MUTED_TEXT), ("active", ACCENT)])
+        style.configure("Primary.TButton", background="#0b7490", foreground=TEXT_FILL, bordercolor=ACCENT)
+        style.map("Primary.TButton", background=[("active", "#09607b")], foreground=[("disabled", MUTED_TEXT), ("active", TEXT_FILL)])
+        style.configure("TCheckbutton", indicatorbackground=INPUT_BACKGROUND, indicatorforeground=ACCENT)
+        style.map("TCheckbutton", background=[("active", PANEL)], indicatorbackground=[("selected", SELECT_BACKGROUND)])
+        style.configure("TNotebook", borderwidth=1, tabmargins=(2, 2, 2, 0))
+        style.configure("TNotebook.Tab", padding=(8, 3), background=INPUT_BACKGROUND, foreground=MUTED_TEXT)
+        style.map("TNotebook.Tab", background=[("selected", "#0c263a")], foreground=[("selected", ACCENT)])
+        style.map("Results.TNotebook.Tab", foreground=[("selected", PURPLE)])
+        style.configure("Treeview", rowheight=22, background=INPUT_BACKGROUND, fieldbackground=INPUT_BACKGROUND,
+                        foreground=TEXT_FILL, bordercolor=BORDER)
+        style.map("Treeview", background=[("selected", SELECT_BACKGROUND)], foreground=[("selected", TEXT_FILL)])
+        style.configure("Treeview.Heading", background="#10223b", foreground=PURPLE, relief="flat")
+        style.map("Treeview.Heading", background=[("active", SELECT_BACKGROUND)])
+        style.configure("TScrollbar", background="#154460", arrowcolor=ACCENT, borderwidth=0)
+        style.configure("Head.TLabel", foreground=ACCENT, font=self._fonts["head"])
+        style.configure("ResultHead.TLabel", foreground=PURPLE, font=self._fonts["head"])
+        style.configure("Section.TLabel", foreground=ACCENT, font=self._fonts["section"])
+        style.configure("Muted.TLabel", foreground=MUTED_TEXT)
+        style.configure("Unit.TLabel", foreground=MUTED_TEXT)
 
     def _build(self) -> None:
         top = ttk.Frame(self.root, padding=(8, 6, 8, 2))
@@ -136,14 +176,14 @@ class GeneralWindow:
         ttk.Entry(top, textvariable=self.title_var, width=28).pack(side=tk.LEFT, padx=(10, 0))
         self.title_var.trace_add("write", self._on_title)
         ttk.Button(top, text="参考算例 B1–B5", command=self.open_reference).pack(side=tk.RIGHT)
-        self.verdict_label = tk.Label(top, text="—", padx=8, pady=1)
+        self.verdict_label = tk.Label(top, text="—", padx=8, pady=1, background=PANEL, foreground=TEXT_FILL)
         self.verdict_label.pack(side=tk.RIGHT, padx=(0, 10))
         self.status_var = tk.StringVar(value="正在计算…")
         ttk.Label(top, textvariable=self.status_var, style="Muted.TLabel").pack(side=tk.RIGHT, padx=(0, 10))
 
         panes = ttk.Panedwindow(self.root, orient=tk.HORIZONTAL)
         panes.pack(fill=tk.BOTH, expand=True, padx=8, pady=(4, 8))
-        left, center, right = (ttk.Frame(panes, padding=2) for _ in range(3))
+        left, center, right = (ttk.Frame(panes, padding=5, style="Cyber.TFrame") for _ in range(3))
         panes.add(left, weight=3)
         panes.add(center, weight=4)
         panes.add(right, weight=3)
@@ -225,7 +265,7 @@ class GeneralWindow:
             var = tk.StringVar(value=entry_text(value))
             widget = ttk.Entry(frame, textvariable=var, width=8)
         widget.grid(row=row, column=1, sticky="ew", pady=1)
-        marker = tk.Label(frame, text="", width=2)
+        marker = tk.Label(frame, text="", width=2, background=PANEL)
         marker.grid(row=row, column=2, sticky="w")
         self._vars[path] = var
         self._rows[path] = (label, widget, marker)
@@ -244,11 +284,13 @@ class GeneralWindow:
         ttk.Label(head, textvariable=self.layer_count_var, style="Muted.TLabel").pack(side=tk.LEFT, padx=4)
         hint = ttk.Label(
             box, style="Muted.TLabel", justify=tk.LEFT,
-            text="自螺栓头侧起排列。μT 指板层传力界面；μK = μG 在螺栓页设置。垫片经验尺寸可改，手动值不会随公称直径覆盖。",
+            text="自螺栓头侧起排列。μT 指板层传力界面；μK 与 μG 在螺栓页独立设置。垫片经验尺寸可改，手动值不会随公称直径覆盖。",
         )
         hint.grid(row=1, column=0, sticky="ew", pady=(2, 2))
         hint.bind("<Configure>", lambda e: hint.configure(wraplength=max(e.width - 4, 100)))
-        self.layer_list = tk.Listbox(box, height=4, exportselection=False, activestyle="none", selectbackground=ACCENT)
+        self.layer_list = tk.Listbox(box, height=4, exportselection=False, activestyle="none",
+                                    background=INPUT_BACKGROUND, foreground=TEXT_FILL, selectbackground=SELECT_BACKGROUND,
+                                    selectforeground=TEXT_FILL, highlightbackground=BORDER, highlightcolor=ACCENT)
         self.layer_list.grid(row=2, column=0, sticky="ew")
         self.layer_list.bind("<<ListboxSelect>>", self._on_layer_list)
         bar = ttk.Frame(box)
@@ -275,7 +317,8 @@ class GeneralWindow:
         self.section_add.pack(side=tk.RIGHT, padx=(0, 4))
         self.selected_var = tk.StringVar()
         ttk.Label(head, textvariable=self.selected_var, style="Muted.TLabel").pack(side=tk.RIGHT, padx=8)
-        self.canvas = tk.Canvas(parent, background="white", highlightthickness=1, highlightbackground="#d5dbe1")
+        self.canvas = tk.Canvas(parent, background=DRAWING_BACKGROUND, highlightthickness=1,
+                                highlightbackground=ACCENT, highlightcolor=ACCENT)
         self.canvas.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
         self.canvas.bind("<Configure>", lambda _e: self._schedule_draw())
         self.canvas.bind("<Button-1>", self._on_section_click)
@@ -289,17 +332,20 @@ class GeneralWindow:
     def _build_results(self, parent: ttk.Frame) -> None:
         head = ttk.Frame(parent)
         head.pack(fill=tk.X)
-        ttk.Label(head, text="计算结果", style="Head.TLabel").pack(side=tk.LEFT)
-        self.export_button = ttk.Button(head, text="导出 TXT", command=self.export_report, state=tk.DISABLED)
+        ttk.Label(head, text="计算结果", style="ResultHead.TLabel").pack(side=tk.LEFT)
+        self.export_button = ttk.Button(head, text="导出 TXT", command=self.export_report, state=tk.DISABLED, style="Primary.TButton")
         self.export_button.pack(side=tk.RIGHT)
-        self.banner = tk.Label(parent, anchor="w", justify=tk.LEFT, padx=6, pady=4, wraplength=360)
+        self.banner = tk.Label(parent, anchor="w", justify=tk.LEFT, padx=6, pady=4, wraplength=360,
+                               background=PANEL, foreground=TEXT_FILL)
         self.banner.pack(fill=tk.X, pady=(4, 2))
-        self.error_list = tk.Listbox(parent, height=0, foreground="#c62828", activestyle="none", exportselection=False)
+        self.error_list = tk.Listbox(parent, height=0, foreground=STATUS_COLORS["不通过"][0], background=STATUS_COLORS["不通过"][1],
+                                    selectbackground=SELECT_BACKGROUND, selectforeground=TEXT_FILL,
+                                    highlightbackground=BORDER, activestyle="none", exportselection=False)
         self.error_list.bind("<<ListboxSelect>>", self._on_error_select)
         self.notes_var = tk.StringVar()
-        self.notes = ttk.Label(parent, textvariable=self.notes_var, foreground="#9a6700", wraplength=360, justify=tk.LEFT)
+        self.notes = ttk.Label(parent, textvariable=self.notes_var, foreground=STATUS_COLORS["需确认"][0], wraplength=360, justify=tk.LEFT)
         self.notes.pack(fill=tk.X)
-        self.result_tabs = ttk.Notebook(parent)
+        self.result_tabs = ttk.Notebook(parent, style="Results.TNotebook")
         self.result_tabs.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
 
         checks = ttk.Frame(self.result_tabs)
@@ -328,7 +374,9 @@ class GeneralWindow:
 
         report = ttk.Frame(self.result_tabs)
         self.result_tabs.add(report, text="报告")
-        self.report_text = tk.Text(report, wrap=tk.NONE, font="TkFixedFont", state=tk.DISABLED, borderwidth=0)
+        self.report_text = tk.Text(report, wrap=tk.NONE, font="TkFixedFont", state=tk.DISABLED, borderwidth=0,
+                                  background=INPUT_BACKGROUND, foreground=TEXT_FILL, insertbackground=ACCENT,
+                                  selectbackground=SELECT_BACKGROUND, selectforeground=TEXT_FILL)
         yscroll = ttk.Scrollbar(report, orient=tk.VERTICAL, command=self.report_text.yview)
         self.report_text.configure(yscrollcommand=yscroll.set)
         yscroll.pack(side=tk.RIGHT, fill=tk.Y)
@@ -382,7 +430,7 @@ class GeneralWindow:
             kind = "" if not source or source == "user" else (
                 "provisional" if path in self.model.provisional or source.startswith("default:") else "catalog"
             )
-        text, color = MARKERS.get(kind, ("", "black"))
+        text, color = MARKERS.get(kind, ("", TEXT_FILL))
         marker.configure(text=text, foreground=color)
 
     def _on_title(self, *_args: object) -> None:
@@ -518,7 +566,7 @@ class GeneralWindow:
 
     def _set_verdict(self, text: str, status: str) -> None:
         foreground, background = STATUS_COLORS.get(status, NEUTRAL_COLORS)
-        self.verdict_label.configure(text=text, foreground="white", background=foreground)
+        self.verdict_label.configure(text=text, foreground=foreground, background=background)
         self.banner.configure(foreground=foreground, background=background)
 
     def _set_tab_errors(self) -> None:
@@ -667,10 +715,11 @@ class GeneralWindow:
             getattr(self.canvas, f"create_{kind}")(*coordinates, **options)
         self._highlight_plate()
         if self.outcome is not None and not self.outcome.ok:
-            note = self.canvas.create_text(width / 2, 14, text="剖面未更新：请先修正标红输入", fill="#c62828", tags=("stale",))
+            fail_color, fail_background = STATUS_COLORS["不通过"]
+            note = self.canvas.create_text(width / 2, 14, text="剖面未更新：请先修正标红输入", fill=fail_color, tags=("stale",))
             x0, y0, x1, y1 = self.canvas.bbox(note)
             self.canvas.tag_lower(
-                self.canvas.create_rectangle(x0 - 8, y0 - 3, x1 + 8, y1 + 3, fill="#fdecea", outline="#c62828", tags=("stale",)),
+                self.canvas.create_rectangle(x0 - 8, y0 - 3, x1 + 8, y1 + 3, fill=fail_background, outline=fail_color, tags=("stale",)),
                 note,
             )
 
@@ -679,7 +728,7 @@ class GeneralWindow:
             index = plate_index(self.canvas.gettags(item))
             if self.canvas.type(item) == "rectangle":
                 selected = index == self.model.selected
-                self.canvas.itemconfigure(item, outline=ACCENT if selected else "#5b7083", width=2 if selected else 1)
+                self.canvas.itemconfigure(item, outline=ACCENT if selected else PLATE_STROKE, width=2 if selected else 1.4)
 
     def _on_plate_click(self, _event: object = None) -> None:
         index = plate_index(self.canvas.gettags("current"))

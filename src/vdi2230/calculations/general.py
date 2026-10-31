@@ -491,7 +491,7 @@ def calculate_general(item: GeneralInput) -> GeneralCalculationResult:
     contact_inner = washer.inner_diameter if washer else chamfer
     contact_outer = min(bearing_d, washer.outer_diameter) if washer else bearing_d
     dkm = v.add("DKm", "支承摩擦平均直径", (contact_outer + contact_inner) / 2, "mm", "R13: 拧紧件接触环面内外径的平均值（垫片不随拧紧件转动）")
-    mu_k = v.add("μK", "支承面摩擦系数", bolt.bearing_friction, "", "螺栓输入；假设 μK = μG")
+    mu_k = v.add("μK", "支承面摩擦系数", bolt.bearing_friction, "", "螺栓输入；独立于螺纹摩擦 μG")
     v.add("MA", "拧紧力矩", fmzul * (0.16 * pitch + 0.58 * d2 * bolt.thread_friction + dkm / 2 * mu_k) / 1000, "N·m", "R13/1")
 
     req = item.requirements

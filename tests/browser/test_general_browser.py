@@ -134,15 +134,48 @@ class GeneralBrowserTests(unittest.TestCase):
         page.locator("#f-joint-type").select_option("DSV")
         expect(self.metric("lK")).to_have_text("43.84 mm")
 
-    def test_single_bolt_friction_input_drives_mu_k(self):
+    def test_bolt_friction_inputs_are_independent(self):
         page = self.page
+        with page.expect_response(CALCULATE):
+            page.locator("#f-bolt-bearing_friction").fill("0.10")
         with page.expect_response(CALCULATE) as response:
             page.locator("#f-bolt-thread_friction").fill("0.18")
         result = response.value.json()
-        self.assertAlmostEqual(next(value["value"] for value in result["values"] if value["symbol"] == "μK"), 0.18)
+        self.assertAlmostEqual(next(value["value"] for value in result["values"] if value["symbol"] == "μK"), 0.10)
+        self.assertEqual(result["input"]["bolt"]["thread_friction"], 0.18)
         self.assertFalse(any("bearing_friction" in layer for layer in result["input"]["plates"]))
-        expect(page.locator("label[for='f-bolt-thread_friction']")).to_contain_text("μG = μK")
-        expect(page.locator(".field[data-path$='.bearing_friction']")).to_have_count(0)
+        expect(page.locator("#f-bolt-bearing_friction")).to_have_value("0.10")
+        expect(page.locator("label[for='f-bolt-thread_friction']")).to_contain_text("螺纹摩擦 μG")
+        expect(page.locator(".field[data-path='bolt.bearing_friction']")).to_be_visible()
+        expect(page.locator(".field[data-path^='plates'][data-path$='.bearing_friction']")).to_have_count(0)
+
+    def test_cyberpunk_theme_contrast_and_translucent_section(self):
+        page = self.page
+        palette = page.evaluate("""() => {
+          const css = getComputedStyle(document.documentElement);
+          return Object.fromEntries(['pane','input','text','muted','accent','purple','pass','pass-bg','fail','fail-bg','review','review-bg']
+            .map(key => [key, css.getPropertyValue('--' + key).trim()]));
+        }""")
+        self.assertEqual(palette["accent"], "#00d9ff")
+        self.assertEqual(palette["purple"], "#bd83ff")
+
+        def luminance(color):
+            channels = [int(color[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+            linear = [value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4 for value in channels]
+            return sum(value * weight for value, weight in zip(linear, (0.2126, 0.7152, 0.0722)))
+
+        for foreground, background in (("text", "pane"), ("muted", "input"), ("pass", "pass-bg"),
+                                       ("fail", "fail-bg"), ("review", "review-bg")):
+            values = sorted((luminance(palette[foreground]), luminance(palette[background])))
+            self.assertGreaterEqual((values[1] + 0.05) / (values[0] + 0.05), 4.5)
+        expect(page.locator("#section [data-role='background']")).to_have_attribute("fill", "#04101f")
+        self.assertGreater(page.locator("#section [data-role='grid']").count(), 0)
+        cones = page.locator("#section [data-role='cone']")
+        expect(cones).to_have_count(2)
+        for cone in cones.all():
+            self.assertLessEqual(float(cone.get_attribute("fill-opacity")), 0.06)
+        expect(page.locator("#f-bolt-d")).to_have_css("background-color", "rgb(6, 16, 31)")
+        expect(page.locator("#f-bolt-d")).to_have_css("color", "rgb(214, 239, 255)")
 
     def test_page_fits_viewport_with_compact_controls(self) -> None:
         page = self.page

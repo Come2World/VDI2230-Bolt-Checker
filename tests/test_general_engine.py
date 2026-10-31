@@ -40,7 +40,7 @@ def b1_payload() -> dict:
         catalog_variant_id=None, property_class="10.9", head_type="socket",
         d=12.0, pitch=1.75, d2=10.863, d3=9.85, stress_area=84.3,
         head_bearing_diameter=17.23, head_height=12.0, length=60.0, thread_length=36.0,
-        yield_strength=940.0, tensile_strength=1040.0, shear_ratio=0.62, thread_friction=0.10,
+        yield_strength=940.0, tensile_strength=1040.0, shear_ratio=0.62, thread_friction=0.10, bearing_friction=0.10,
     )
     payload["tapped"].update(material_id=None, youngs_modulus=205000.0, tensile_strength=700.0, shear_strength=460.0)
     payload["plates"] = [_layer(0, thickness=42.0, limiting_surface_pressure=1300.0, roughness_rz=16.0)]
@@ -59,7 +59,7 @@ def b2_payload() -> dict:
         catalog_variant_id=None, property_class="10.9", head_type="hex",
         d=16.0, pitch=2.0, d2=14.701, d3=13.546, stress_area=157.0,
         head_bearing_diameter=22.5, head_height=10.0, length=80.0, thread_length=38.0,
-        yield_strength=940.0, tensile_strength=1000.0, shear_ratio=0.62, thread_friction=0.12,
+        yield_strength=940.0, tensile_strength=1000.0, shear_ratio=0.62, thread_friction=0.12, bearing_friction=0.12,
     )
     payload["nut"].update(height=14.1, bearing_diameter=22.5)
     payload["plates"] = [
@@ -81,7 +81,7 @@ def b3_payload() -> dict:
         d=27.0, pitch=2.0, d2=25.7, d3=24.54, stress_area=495.6,
         head_bearing_diameter=36.0, head_height=10.0, length=40.0, thread_length=24.0,
         shank_diameter=24.0, bore_diameter=16.0,
-        yield_strength=660.0, tensile_strength=830.0, shear_ratio=0.65, thread_friction=0.12,
+        yield_strength=660.0, tensile_strength=830.0, shear_ratio=0.65, thread_friction=0.12, bearing_friction=0.10,
     )
     payload["tapped"].update(material_id=None, tensile_strength=1000.0, shear_strength=600.0, engagement_length=18.5, outer_diameter=50.0)
     payload["plates"] = [
@@ -157,11 +157,9 @@ class GeneralRegressionTests(unittest.TestCase):
         self.assert_close(result.value("FMzul"), reference(source, "FMzul"), "B3 FMzul")
         self.assert_close(result.check("SG").value, reference(source, "SG"), "B3 SG")
         self.assert_close(result.check("Sp,K").value, reference(source, "Sp"), "B3 Sp")
-        # B3 uses muK=0.10, muG=0.12; the new shared-friction assumption intentionally changes MA.
-        torque_increase = result.value("FMzul") * result.value("DKm") / 2 * (0.12 - 0.10) / 1000
-        self.assert_close(result.value("MA") - torque_increase, reference(source, "MA"), "B3 MA with original muK")
-        self.assertAlmostEqual(result.value("μK"), 0.12)
-        self.assertGreater(result.value("MA"), reference(source, "MA") * 1.03)
+        self.assert_close(result.value("MA"), reference(source, "MA"), "B3 MA")
+        self.assertAlmostEqual(result.value("μK"), 0.10)
+        self.assertAlmostEqual(result.input.bolt.thread_friction, 0.12)
         self.assert_close(result.value("A0"), reference(source, "A0"), "B3 A0")
         self.assert_close(result.value("δS"), reference(source, "dS"), "B3 δS")
         self.assert_close(result.value("δP"), reference(source, "dP"), "B3 δP")
@@ -179,6 +177,18 @@ class GeneralRegressionTests(unittest.TestCase):
 
 
 class GeneralEngineBehaviourTests(unittest.TestCase):
+    def test_bearing_friction_changes_only_bearing_torque_not_thread_stress(self):
+        payload = default_input_json()
+        baseline = run(payload)
+        payload["bolt"]["bearing_friction"] = 0.10
+        result = run(payload)
+        self.assertEqual(result.value("μK"), 0.10)
+        self.assertEqual(result.input.bolt.thread_friction, 0.12)
+        expected_change = baseline.value("FMzul") * baseline.value("DKm") / 2 * 0.02 / 1000
+        self.assertAlmostEqual(baseline.value("MA") - result.value("MA"), expected_change)
+        for symbol in ("FMzul", "MG", "SF", "SD", "Sp,K", "Sp,M"):
+            self.assertEqual(result.value(symbol), baseline.value(symbol), symbol)
+
     def test_default_input_uses_catalog_data_and_needs_review(self) -> None:
         result = run(default_input_json())
         self.assertEqual(result.verdict, ResultStatus.NEEDS_REVIEW)

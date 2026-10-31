@@ -12,7 +12,7 @@ from typing import Any
 from vdi2230 import data as engineering_data
 
 
-SCHEMA_ID = "vdi2230.general/2"
+SCHEMA_ID = "vdi2230.general/3"
 MAX_LAYERS = 10
 WASHER_SECTIONS = ("head_washer", "nut_washer")
 WASHER_ESTIMATE_SOURCE = "default:平垫片经验尺寸"
@@ -109,7 +109,8 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
     _f("bolt.tensile_strength_max", "最大抗拉强度 Rm,max", "MPa", None, "bolt", optional=True, help="留空 = 1.2·Rm", **POSITIVE),
     _f("bolt.shear_ratio", "剪切强度比 τB/Rm", "", 0.65, "bolt", minimum=0.3, maximum=1.2),
     _f("bolt.rolling", "螺纹滚压", "", "SV", "bolt", kind="choice", choices=ROLLING),
-    _f("bolt.thread_friction", "摩擦 μG = μK", "", 0.12, "bolt", help="螺纹与拧紧侧支承面摩擦系数始终相等", **FRICTION),
+    _f("bolt.thread_friction", "螺纹摩擦 μG", "", 0.12, "bolt", **FRICTION),
+    _f("bolt.bearing_friction", "支承摩擦 μK", "", 0.12, "bolt", help="独立输入；拧紧侧螺栓头/螺母与垫片或板面的摩擦", **FRICTION),
     _f("nut.height", "螺母高度 m", "mm", 10.8, "bolt", **POSITIVE),
     _f("nut.bearing_diameter", "螺母支承直径 dW", "mm", 16.6, "bolt", **POSITIVE),
     _f("nut.width_across_flats", "螺母对边 s", "mm", 18.0, "bolt", **POSITIVE),
@@ -210,10 +211,7 @@ class BoltInput:
     shear_ratio: float
     rolling: str
     thread_friction: float
-
-    @property
-    def bearing_friction(self) -> float:
-        return self.thread_friction
+    bearing_friction: float
 
 
 @dataclass(frozen=True)
@@ -508,11 +506,9 @@ def parse_general_input(data: Any) -> GeneralInput:
     if not isinstance(data, dict):
         raise InputValidationError([FieldError("", "输入应为 JSON 对象")])
     if data.get("schema", SCHEMA_ID) != SCHEMA_ID:
-        errors.append(FieldError("schema", f"仅支持 {SCHEMA_ID}；旧版需移除板层 μK，并确认采用螺栓 μK = μG"))
+        errors.append(FieldError("schema", f"仅支持 {SCHEMA_ID}；请分别确认螺栓的 thread_friction (μG) 和 bearing_friction (μK)"))
 
     values: dict[str, dict[str, Any]] = {name: {} for name in SECTION_TYPES}
-    if "bearing_friction" in _section_payload(data, "bolt", errors):
-        errors.append(FieldError("bolt.thread_friction", "μK 由 μG 派生，请只提交 thread_friction，不要单独提交 bearing_friction"))
     for spec in FIELD_SPECS:
         section, name = spec.path.split(".", 1)
         payload = _section_payload(data, section, errors)
@@ -537,7 +533,7 @@ def parse_general_input(data: Any) -> GeneralInput:
             errors.append(FieldError(prefix, "应为对象"))
             continue
         if "bearing_friction" in raw_layer:
-            errors.append(FieldError(f"{prefix}.bearing_friction", "板层 μK 已移除，请在螺栓中使用 μG = μK"))
+            errors.append(FieldError(f"{prefix}.bearing_friction", "板层 μK 已移除，请改为螺栓的 bearing_friction"))
         layer_values = {
             spec.name: _parse_value(spec, raw_layer.get(spec.name, spec.default), f"{prefix}.{spec.name}", errors)
             for spec in LAYER_SPECS

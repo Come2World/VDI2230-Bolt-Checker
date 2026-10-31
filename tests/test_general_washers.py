@@ -70,12 +70,14 @@ class WasherInputTests(unittest.TestCase):
         payload = default_input_json()
         payload["schema"] = "vdi2230.general/1"
         self.assertIn("schema", error_paths(payload))
+        payload["schema"] = "vdi2230.general/2"
+        self.assertIn("schema", error_paths(payload))
         payload = default_input_json()
         payload["plates"][0]["bearing_friction"] = 0.1
         self.assertIn("plates[0].bearing_friction", error_paths(payload))
         payload = default_input_json()
         payload["bolt"]["bearing_friction"] = 0.1
-        self.assertIn("bolt.thread_friction", error_paths(payload))
+        self.assertEqual(parse_general_input(payload).bolt.bearing_friction, 0.1)
 
     def test_advanced_cone_cannot_enlarge_the_washer_contact(self):
         payload = default_input_json()
@@ -157,13 +159,14 @@ class WasherCalculationTests(unittest.TestCase):
                 payload = default_input_json()
                 payload[f"{side}_washer"].update(enabled=True, inner_diameter=14, outer_diameter=32)
                 payload["bolt"]["thread_friction"] = 0.18
+                payload["bolt"]["bearing_friction"] = 0.10
                 payload["assembly"]["tighten_side"] = side
                 result = calculate(payload)
                 bearing = result.input.bolt.head_bearing_diameter if side == "head" else result.input.nut.bearing_diameter
                 dkm = (bearing + 14) / 2
                 self.assertAlmostEqual(result.value("DKm"), dkm)
-                self.assertAlmostEqual(result.value("μK"), 0.18)
-                expected = result.value("FMzul") * (0.16 * 1.75 + 0.58 * result.input.bolt.d2 * 0.18 + dkm / 2 * 0.18) / 1000
+                self.assertAlmostEqual(result.value("μK"), 0.10)
+                expected = result.value("FMzul") * (0.16 * 1.75 + 0.58 * result.input.bolt.d2 * 0.18 + dkm / 2 * 0.10) / 1000
                 self.assertAlmostEqual(result.value("MA"), expected)
 
     def test_washer_thickness_reduces_engagement(self):
@@ -207,7 +210,7 @@ class WasherCalculationTests(unittest.TestCase):
         payload["head_washer"]["enabled"] = payload["nut_washer"]["enabled"] = True
         result = calculate(payload)
         report = render_general_report(result)
-        for text in ("头侧垫片", "螺母侧垫片", "43.84", "μG = μK", "δW", "Sp,W,K", "不计载荷扩散"):
+        for text in ("头侧垫片", "螺母侧垫片", "43.84", "支承摩擦 μK", "螺纹摩擦 μG", "δW", "Sp,W,K", "不计载荷扩散"):
             self.assertIn(text, report)
         status, response = calculate_payload({"input": payload})
         self.assertEqual(status, 200)

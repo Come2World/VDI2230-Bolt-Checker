@@ -72,11 +72,13 @@ class CanvasItemTests(unittest.TestCase):
         self.assertEqual(plate_index(options["tags"]), 2)
         self.assertIsNone(plate_index(("bolt",)))
 
-    def test_polygon_opacity_is_blended_with_white(self):
+    def test_translucent_polygon_has_no_opaque_fill_on_tk(self):
         _, _, options = canvas_item(Shape("polygon", (0, 0, 1, 0, 1, 1), fill="#000000", opacity=0.5, dash=True))
-        self.assertEqual(options["fill"], "#808080")
+        self.assertEqual(options["fill"], "")
         self.assertEqual(options["dash"], (4, 3))
         self.assertEqual(options["tags"], ())
+        _, _, opaque = canvas_item(Shape("polygon", (0, 0, 1, 0, 1, 1), fill="#07334c"))
+        self.assertEqual(opaque["fill"], "#07334c")
 
     def test_text_maps_anchor_size_and_rotation(self):
         kind, points, options = canvas_item(Shape("text", (5, 6), text="lK 40", anchor="middle", size=10, rotate=-90))
