@@ -67,6 +67,7 @@ FRICTION = {"minimum": 0.01, "maximum": 1.0}
 
 JOINT_TYPES = (("DSV", "通孔螺栓 + 螺母 (DSV)"), ("ESV", "螺纹孔连接 (ESV)"))
 HEAD_TYPES = (("hex", "外六角头"), ("socket", "内六角圆柱头"))
+TAPPED_HOLE_TYPES = (("blind", "盲孔"), ("through", "通孔"))
 ROLLING = (("SV", "热处理前滚丝 SV"), ("SG", "热处理后滚丝 SG"))
 TABLE_MODES = (("table", "查表"), ("manual", "手动"))
 CONE_MODES = (("auto", "自动"), ("TBJ", "DSV 锥公式 (43)"), ("TTJ", "ESV 锥公式 (42)"))
@@ -136,7 +137,15 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
     _f("tapped.youngs_modulus", "内螺纹件 EM", "MPa", 205_000.0, "bolt", **POSITIVE),
     _f("tapped.tensile_strength", "内螺纹件 Rm", "MPa", 700.0, "bolt", **POSITIVE),
     _f("tapped.shear_strength", "内螺纹件 τB", "MPa", 460.0, "bolt", **POSITIVE),
-    _f("tapped.engagement_length", "旋合长度 mges", "mm", None, "bolt", optional=True, help="留空 = l − lK", **POSITIVE),
+    _f("tapped.hole_type", "攻丝孔类型", "", "blind", "bolt", kind="choice", choices=TAPPED_HOLE_TYPES),
+    _f("tapped.thickness", "内螺纹件厚度 H", "mm", None, "bolt", optional=True,
+       help="留空 = 按螺栓伸入长度和孔深估算；不计入夹紧长度 lK", **POSITIVE),
+    _f("tapped.hole_depth", "钻孔深度 Lh", "mm", None, "bolt", optional=True,
+       help="盲孔自接触面至钻尖；留空 = l − lK + 0.4d；钻尖按 118° 估算", **POSITIVE),
+    _f("tapped.thread_depth", "完整内螺纹深度 Lt", "mm", None, "bolt", optional=True,
+       help="自接触面起；留空 = 螺栓伸入与可用孔深的较小值；参与 R11 校核", **POSITIVE),
+    _f("tapped.engagement_length", "旋合长度 mges", "mm", None, "bolt", optional=True,
+       help="可用旋合长度上限；留空 = 内外螺纹实际重叠长度", **POSITIVE),
     _f("tapped.outer_diameter", "内螺纹外围直径 s", "mm", None, "bolt", optional=True, help="留空 = C1 取 1", **POSITIVE),
     _f("joint.hole_diameter", "通孔直径 dh", "mm", 13.5, "plates", **POSITIVE),
     _f("joint.chamfer_diameter", "倒角直径 dha", "mm", None, "plates", optional=True, help="留空 = dh", **POSITIVE),
@@ -252,6 +261,21 @@ class TappedInput:
     shear_strength: float
     engagement_length: float | None
     outer_diameter: float | None
+    hole_type: str = "blind"
+    thickness: float | None = None
+    hole_depth: float | None = None
+    thread_depth: float | None = None
+
+
+@dataclass(frozen=True)
+class TappedGeometry:
+    thickness: float
+    hole_depth: float
+    cylindrical_depth: float
+    drill_diameter: float
+    thread_depth: float
+    engagement_start: float
+    engagement_length: float
 
 
 @dataclass(frozen=True)
@@ -394,6 +418,26 @@ class GeneralInput:
     @property
     def nut_washer_thickness(self) -> float:
         return self.nut_washer.thickness if self.is_through_bolt and self.nut_washer.enabled else 0.0
+
+    @property
+    def tapped_geometry(self) -> TappedGeometry:
+        """Resolved lengths from the tapped part's contact face, shared by R11 and drawing."""
+        bolt, tapped = self.bolt, self.tapped
+        protrusion = bolt.length - self.clamp_length
+        drill_diameter = bolt.d - 1.0825318 * bolt.pitch
+        if tapped.hole_type == "through":
+            thickness = tapped.thickness if tapped.thickness is not None else protrusion + 0.5 * bolt.d
+            hole_depth = cylindrical = thickness
+        else:
+            hole_depth = tapped.hole_depth if tapped.hole_depth is not None else protrusion + 0.4 * bolt.d
+            thickness = tapped.thickness if tapped.thickness is not None else max(protrusion + bolt.d, hole_depth + 0.5 * bolt.d)
+            cylindrical = hole_depth - drill_diameter / (2 * math.tan(math.radians(59)))
+        thread_depth = tapped.thread_depth if tapped.thread_depth is not None else min(protrusion, cylindrical)
+        shank = 0.0 if bolt.thread_length is None else bolt.length - bolt.thread_length
+        start = max(0.0, shank - self.clamp_length)
+        available = max(0.0, min(protrusion, thread_depth) - start)
+        engagement = available if tapped.engagement_length is None else min(available, tapped.engagement_length)
+        return TappedGeometry(thickness, hole_depth, cylindrical, drill_diameter, thread_depth, start, engagement)
 
     def washer_at(self, side: str) -> WasherInput | None:
         washer = self.head_washer if side == "head" else self.nut_washer
@@ -720,6 +764,15 @@ def _validate_relations(item: GeneralInput) -> None:
         engagement = item.tapped.engagement_length
         if engagement is not None:
             require(engagement <= bolt.length - clamp + 1e-9, "tapped.engagement_length", "不能超过 l − lK")
+        geometry = item.tapped_geometry
+        require(geometry.thread_depth <= geometry.cylindrical_depth + 1e-9,
+                "tapped.thread_depth", "完整内螺纹深度须 ≤ 可用圆柱孔深")
+        require(geometry.engagement_length > 0, "tapped.thread_depth", "内外螺纹须有正的重叠旋合长度")
+        if item.tapped.hole_type == "blind":
+            require(geometry.hole_depth < geometry.thickness,
+                    "tapped.hole_depth", "盲孔钻尖深度须小于内螺纹件厚度 H；通孔请选择通孔类型")
+            require(bolt.length - clamp < geometry.cylindrical_depth - 1e-9,
+                    "bolt.length", "螺栓不得顶底：伸入长度须小于盲孔圆柱深度（不含钻尖）")
     if errors:
         raise InputValidationError(errors)
 

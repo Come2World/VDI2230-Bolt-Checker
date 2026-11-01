@@ -52,7 +52,11 @@ def _relevant(item: GeneralInput, path: str) -> bool:
     if path.startswith("nut."):
         return item.is_through_bolt
     if path.startswith("tapped."):
-        return not item.is_through_bolt
+        return not item.is_through_bolt and (path != "tapped.hole_depth" or item.tapped.hole_type != "through")
+    if path == "bolt.head_width_across_flats":
+        return item.bolt.head_type == "hex"
+    if path in {"bolt.head_diameter", "bolt.socket_size", "bolt.socket_depth"}:
+        return item.bolt.head_type == "socket"
     if path == "load_introduction.n":
         return item.load_introduction.mode == "manual"
     if path in {"load_introduction.joint_class", "load_introduction.la_over_h", "load_introduction.ak_over_h"}:
@@ -140,6 +144,11 @@ def render_general_report(
                     path = f"plates[{index}].{spec.name}"
                     if path in item.provenance:
                         lines.append(f"       {t(spec.label)} {t('来源')}{_source(item, path, language)}")
+        if group == "bolt" and not item.is_through_bolt:
+            geometry = item.tapped_geometry
+            dimensions = f"H = {_number(geometry.thickness)}, Lh = {_number(geometry.hole_depth)}, Lt = {_number(geometry.thread_depth)}, mvorh = {_number(geometry.engagement_length)} mm"
+            lines.append(f"  {t('ESV 解析几何（留空尺寸为估算）')}{colon}{dimensions}")
+            lines.append("  " + t("盲孔 Lh 含 118° 钻尖；通孔 Lh = H；实际旋合取内外螺纹重叠并受 mges 限制，红色段与 R11 一致。"))
 
     lines += ["", t("三、计算过程与全部结果"), THIN_RULE]
     for value in result.result.values:

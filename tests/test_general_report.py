@@ -57,6 +57,22 @@ class GeneralReportTests(unittest.TestCase):
         self.assertIn("内螺纹件 EM", esv)
         self.assertNotIn("螺母高度 m", esv)
         self.assertNotIn("n (手动)", dsv)
+        self.assertNotIn("内六角深度 t =", dsv)
+
+    def test_socket_report_contains_filled_dimensions_in_both_languages(self) -> None:
+        model = GeneralFormModel()
+        model.set_value("bolt.head_type", "socket")
+        zh = model.calculate("zh")
+        self.assertTrue(zh.ok, zh.error)
+        for text in ("头部直径 dk = 18", "内六角对边 s = 10", "内六角深度 t = 6"):
+            self.assertIn(text, zh.report)
+        self.assertNotIn("头部对边 s =", zh.report)
+        model.set_language("en")
+        en = model.calculate("en")
+        self.assertTrue(en.ok, en.error)
+        for text in ("Head diameter dk = 18", "Socket size s = 10", "Socket depth t = 6"):
+            self.assertIn(text, en.report)
+        self.assertNotIn("Head width across flats s =", en.report)
 
     def test_not_applicable_checks_explain_reason(self) -> None:
         _, text = report_for(b3_payload())

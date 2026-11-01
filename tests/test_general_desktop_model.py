@@ -166,6 +166,7 @@ class GeneralFormModelTests(unittest.TestCase):
         self.assertEqual(model.values["bolt.head_type"], "socket")
         self.assertEqual(model.values["bolt.head_bearing_diameter"], 17.23)
         self.assertEqual(model.values["bolt.head_diameter"], 18.0)
+
         self.assertEqual(model.values["nut.width_across_flats"], 18.0)
         self.assertEqual(model.source_for("bolt.head_type"), "catalog:ISO4762-M12x1.75")
         for path in ("bolt.head_diameter", "bolt.socket_size", "bolt.socket_depth"):
@@ -178,6 +179,63 @@ class GeneralFormModelTests(unittest.TestCase):
         # DSV: βL = lP / mean(dW head, dW nut) uses the ISO 4762 head dW.
         mean_dw = (17.23 + model.values["nut.bearing_diameter"]) / 2
         self.assertAlmostEqual(outcome.result.value("βL") * mean_dw, sum(layer.values["thickness"] for layer in model.layers))
+
+    def test_head_type_selection_fills_matching_geometry_without_changing_strength(self):
+        model = self.model
+        model.set_value("bolt.yield_strength", 650.0)
+        model.set_value("bolt.fatigue_strength_amplitude", 55.0)
+        self.assertIsNone(model.set_value("bolt.head_type", "socket"))
+        self.assertEqual(model.values["bolt.catalog_variant_id"], "ISO4762-M12x1.75")
+        self.assertEqual(model.values["bolt.head_diameter"], 18.0)
+        self.assertEqual(model.values["bolt.socket_size"], 10.0)
+        self.assertEqual(model.values["bolt.socket_depth"], 6.0)
+        self.assertEqual(model.values["bolt.yield_strength"], 650.0)
+        self.assertEqual(model.values["bolt.fatigue_strength_amplitude"], 55.0)
+        model.set_value("bolt.head_diameter", 19.0)
+        model.set_value("bolt.length", 80.0)
+        self.assertEqual(model.values["bolt.head_type"], "socket")
+        self.assertEqual(model.values["bolt.head_diameter"], 19.0)
+        self.assertEqual(model.values["bolt.yield_strength"], 650.0)
+        self.assertIsNone(model.set_value("bolt.head_type", "hex"))
+        self.assertEqual(model.values["bolt.catalog_variant_id"], "ISO4014-M12x1.75")
+        self.assertEqual(model.values["bolt.head_width_across_flats"], 18.0)
+        self.assertIsNone(model.values["bolt.head_diameter"])
+
+    def test_head_type_and_variant_fill_geometry_without_a_property_class(self):
+        model = self.model
+        model.set_value("bolt.property_class", None)
+        self.assertIsNone(model.set_value("bolt.head_type", "socket"))
+        self.assertEqual(model.values["bolt.socket_size"], 10.0)
+        self.assertIsNone(model.values["bolt.property_class"])
+        self.assertIsNone(model.set_value("bolt.catalog_variant_id", "ISO4762-M16x2.0"))
+        self.assertEqual(model.values["bolt.head_diameter"], 24.0)
+        self.assertEqual(model.values["bolt.socket_size"], 14.0)
+
+    def test_unavailable_socket_geometry_is_explicitly_custom(self):
+        model = self.model
+        model.set_value("bolt.catalog_variant_id", "ISO4014-M18x2.5")
+        notice = model.set_value("bolt.head_type", "socket")
+        self.assertIn("自定义", notice)
+        self.assertIsNone(model.values["bolt.catalog_variant_id"])
+        self.assertEqual(model.values["bolt.head_type"], "socket")
+        model.set_value("bolt.length", 90.0)
+        self.assertEqual(model.values["bolt.head_type"], "socket")
+
+    def test_tapped_depth_visibility_and_bilingual_report(self):
+        model = self.model
+        model.set_value("joint.type", "ESV")
+        model.set_value("tapped.hole_type", "through")
+        model.set_value("tapped.thickness", 20.0)
+        self.assertFalse(model.is_relevant("tapped.hole_depth"))
+        self.assertTrue(model.is_relevant("tapped.thread_depth"))
+        model.set_language("en")
+        outcome = model.calculate("en")
+        self.assertTrue(outcome.ok, outcome.error)
+        self.assertNotRegex(outcome.report, r"[\u4e00-\u9fff]")
+        self.assertIn("H = 20, Lh = 20, Lt = 20, mvorh = 20 mm", outcome.report)
+        self.assertNotIn("Drilled hole depth Lh =", outcome.report)
+        model.set_value("tapped.hole_type", "blind")
+        self.assertTrue(model.is_relevant("tapped.hole_depth"))
 
     def test_property_class_updates_strength(self):
         self.model.set_value("bolt.property_class", "10.9")

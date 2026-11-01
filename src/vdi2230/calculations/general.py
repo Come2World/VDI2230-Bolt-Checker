@@ -314,11 +314,9 @@ def calculate_general(item: GeneralInput) -> GeneralCalculationResult:
         protrusion = bolt.length - clamp
         engagement = min(nut.height, protrusion)
     else:
-        threaded_start = max(clamp, shank_total)
-        engagement = bolt.length - threaded_start
-        if tapped.engagement_length is not None:
-            engagement = min(engagement, tapped.engagement_length)
-    v.add("mvorh", "现有旋合长度", max(engagement, 0.0), "mm", "DSV: min(m, l − lK); ESV: l − max(lK, l − b)")
+        engagement = item.tapped_geometry.engagement_length
+    v.add("mvorh", "现有旋合长度", max(engagement, 0.0), "mm",
+          "DSV: min(m, l − lK); ESV: min(l − lK, Lt) − max(0, l − b − lK)，再受 mges 限制")
 
     # R3 compliances
     area_nominal = area_circle(d)

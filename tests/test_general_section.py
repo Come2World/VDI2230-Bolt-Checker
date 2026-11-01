@@ -4,7 +4,7 @@ from test_general_engine import b1_payload, b2_payload, b3_payload
 from vdi2230.calculations.general import calculate_general
 from vdi2230.domain.general_inputs import default_input_json, default_layer, parse_general_input
 from vdi2230.data import bolt_catalog_values
-from vdi2230.infrastructure.general_section import general_section_shapes, section_target
+from vdi2230.infrastructure.general_section import ENGAGEMENT_STROKE, general_section_shapes, section_target
 
 
 def shapes_for(payload, width=640, height=560):
@@ -18,6 +18,59 @@ def roles(shapes):
 
 
 class GeneralSectionTests(unittest.TestCase):
+    def test_esv_engagement_is_red_and_dimension_matches_r11(self):
+        payload = b1_payload()
+        payload["tapped"].update(thickness=40.0, hole_depth=32.0, thread_depth=14.0, engagement_length=10.0)
+        item, result, shapes = shapes_for(payload)
+        scale = self._scale(item, shapes)
+        red = [s for s in shapes if s.role == "engaged-thread"]
+        self.assertEqual(len(red), 4)
+        clamp_y = next(s for s in shapes if s.role == "tapped" and s.kind == "rect").points[1]
+        for line in red:
+            self.assertEqual(line.stroke, ENGAGEMENT_STROKE)
+            self.assertAlmostEqual((line.points[3] - line.points[1]) / scale, result.value("mvorh"))
+            self.assertAlmostEqual(line.points[1], clamp_y)
+        self.assertEqual(result.value("mvorh"), 10.0)
+        self.assertEqual(result.check("mges").value, 10.0)
+        for role, expected in (("dim-H", "H 40"), ("dim-Lh", "Lh 32"), ("dim-Lt", "Lt 14"), ("dim-mges", "mges 10")):
+            self.assertEqual([s.text for s in shapes if s.role == role and s.kind == "text"], [expected])
+        self.assertEqual(section_target("engaged-thread"), "tapped.engagement_length")
+        self.assertEqual(section_target("dim-H"), "tapped.thickness")
+        self.assertEqual(section_target("dim-Lh"), "tapped.hole_depth")
+        self.assertEqual(section_target("dim-Lt"), "tapped.thread_depth")
+
+    def test_esv_red_segment_starts_at_external_thread_and_stops_at_internal_depth(self):
+        payload = b1_payload()
+        payload["bolt"]["thread_length"] = 12.0
+        payload["tapped"]["thread_depth"] = 12.0
+        item, result, shapes = shapes_for(payload)
+        scale = self._scale(item, shapes)
+        top = next(s for s in shapes if s.role == "tapped" and s.kind == "rect").points[1]
+        red = next(s for s in shapes if s.role == "engaged-thread")
+        self.assertAlmostEqual((red.points[1] - top) / scale, 6.0)
+        self.assertAlmostEqual((red.points[3] - top) / scale, 12.0)
+        self.assertEqual(result.value("mvorh"), 6.0)
+
+    def test_esv_blind_and_through_geometry_and_dimensions_fit_view(self):
+        for hole_type in ("blind", "through"):
+            payload = b1_payload()
+            payload["tapped"].update(hole_type=hole_type, thickness=35.0 if hole_type == "blind" else 12.0)
+            for width, height in ((420, 320), (640, 560), (1200, 900)):
+                with self.subTest(hole_type=hole_type, size=(width, height)):
+                    item, result, shapes = shapes_for(payload, width, height)
+                    for shape in shapes:
+                        self.assertTrue(all(0 <= x <= width for x in shape.points[0::2]), shape)
+                        self.assertTrue(all(0 <= y <= height for y in shape.points[1::2]), shape)
+                    body = next(s for s in shapes if s.role == "tapped" and s.kind == "rect")
+                    scale = self._scale(item, shapes)
+                    self.assertAlmostEqual((body.points[3] - body.points[1]) / scale, item.tapped.thickness)
+                    self.assertEqual("dim-Lh" in roles(shapes), hole_type == "blind")
+                    hole = next(s for s in shapes if s.role == "tapped-hole")
+                    self.assertEqual(len(hole.points), 10 if hole_type == "blind" else 8)
+                    if hole_type == "through":
+                        self.assertEqual(result.value("mvorh"), 12.0)
+                        self.assertGreater(max(s.points[1::2][-1] for s in shapes if s.role == "bolt-thread"), body.points[3])
+
     def test_through_bolt_has_nut_and_no_tapped_part(self) -> None:
         _, _, shapes = shapes_for(default_input_json())
         self.assertIn("nut", roles(shapes))

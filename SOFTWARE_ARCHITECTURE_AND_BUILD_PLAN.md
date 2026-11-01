@@ -2,11 +2,11 @@
 
 | 项目 | 内容 |
 |---|---|
-| 文档版本 | 0.13 |
+| 文档版本 | 0.14 |
 | 日期 | 2026-11-01 |
 | 应用版本 | 0.0.1 |
 | 发布分支 | `VDI2230_BOLT_CHECKER_RELEASE_0.0.1` |
-| 对应需求 | [需求规格说明书](./SOFTWARE_REQUIREMENTS_SPECIFICATION.md) v1.7 |
+| 对应需求 | [需求规格说明书](./SOFTWARE_REQUIREMENTS_SPECIFICATION.md) v1.8 |
 | 当前交付 | 通用 Tk 桌面计算器；内部保留标准算例回归 |
 
 ## 1. 发布范围与裁剪原则
@@ -101,6 +101,10 @@ tests/test_reference_cases.py → 内部固定标准算例计算器
 （`head_width_across_flats`、`head_diameter`、`socket_size`、`socket_depth`）属于目录路径；
 旧文件缺这些可选字段时取空，由剖面按 dW 估算，输入 schema 保持 `vdi2230.general/4`。
 剖面 `general_section.py` 绘制 dW 支承面、dW 尺寸线（可点击跳转 dW 字段）和承压环面。
+`bolt_geometry_values()` 抽出不依赖强度等级的几何填充；直接修改 `bolt.head_type`
+匹配当前 d/P 目录，更新头部及仍由目录管理的几何、保留手动强度和非头部几何。
+无匹配时清除目录选择/几何目录来源并显式提示自定义。Tk 同步新增字段值和可见性，
+避免仅显示 socket 字段却未加载尺寸。
 
 目录版本 0.4.0 增加 A2-70/80/90；A2 模量从 `material:X5CrNi18-10`
 取 200000 MPa。A2-70/80 的剪切比来自表 7，A2-90 切换时清除旧剪切比和来源，
@@ -120,6 +124,21 @@ Rm,max 时不计算；非标准螺母还要求自身强度及剪切比。
 其余满足当前判据时 → 通过。不适用项目单独显示。
 经验垫片尺寸、未知目录记录和模型假设不因随附数据采信而免于提示。
 内部 `provisional_sources` 等名称继续用于这些未采信来源，不等同于数据库记录仍为 provisional。
+
+### 3.4 ESV 几何共享
+
+`TappedInput` 新增 `hole_type`、可选 `thickness`、`hole_depth`、`thread_depth`；
+字段缺省保持旧文件兼容，schema 仍为 4。`GeneralInput.tapped_geometry`
+生成不可变 `TappedGeometry`，统一解析件厚、孔深、118° 钻尖后的圆柱孔深、
+完整内螺纹深、外螺纹在内螺纹件中的起点及实际旋合长度。
+盲孔顶底/孔穿件/螺纹超孔深以及无重叠在输入层明确拒绝；
+通孔允许螺栓伸出，螺纹深不得超过 H。
+
+R0 `mvorh`、R11、`SectionMetrics.engagement_length`、红色 `engaged-thread`
+及 `dim-mges` 均消费同一解析长度。绘图显示 H/Lh/Lt 及对应孔边界，
+不能仅给螺栓尾部增加示意矩形。Tk 切换孔型隐藏/显示 Lh，编辑尺寸走既有
+debounce/过期恢复；图元 role 映射到对应字段。报告输出解析尺寸并声明估算，
+不会将新增件厚误加到 lK。
 
 ## 4. 垫片、图元与双语
 

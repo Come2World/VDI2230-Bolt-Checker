@@ -72,6 +72,14 @@ class VdiTableTests(unittest.TestCase):
 
 
 class CatalogLookupTests(unittest.TestCase):
+    def test_geometry_lookup_is_shared_by_all_strength_classes(self):
+        geometry = data.bolt_geometry_values("ISO4762-M12x1.75", 70)
+        self.assertNotIn("bolt.yield_strength", geometry)
+        self.assertNotIn("bolt.youngs_modulus", geometry)
+        for grade in ("8.8", "10.9", "12.9", "A2-70", "A2-80", "A2-90"):
+            catalog = data.bolt_catalog_values("ISO4762-M12x1.75", 70, grade)
+            self.assertEqual({path: catalog[path] for path in geometry}, geometry)
+
     def test_variant_values_are_catalog_first(self):
         values = data.bolt_catalog_values("ISO4014-M12x1.75", 60, "10.9")
         self.assertEqual(values["bolt.d"], 12.0)

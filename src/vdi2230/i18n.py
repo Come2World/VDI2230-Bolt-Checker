@@ -186,6 +186,32 @@ MESSAGES = {
     "内螺纹件 τB": "Tapped part shear strength τB",
     "内螺纹外围直径 s": "Tapped-part outer diameter s",
     "旋合长度 mges": "Engagement length mges",
+    "可用旋合长度上限；留空 = 内外螺纹实际重叠长度": "Engagement limit; blank = actual overlap of internal and external threads",
+    "攻丝孔类型": "Tapped hole type",
+    "盲孔": "Blind hole",
+    "通孔": "Through hole",
+    "内螺纹件厚度 H": "Tapped part thickness H",
+    "钻孔深度 Lh": "Drilled hole depth Lh",
+    "完整内螺纹深度 Lt": "Full internal thread depth Lt",
+    "留空 = 按螺栓伸入长度和孔深估算；不计入夹紧长度 lK":
+        "Blank = estimated from bolt insertion and hole depth; excluded from grip length lK",
+    "盲孔自接触面至钻尖；留空 = l − lK + 0.4d；钻尖按 118° 估算":
+        "Blind hole: contact face to drill tip; blank = l − lK + 0.4d; drill tip estimated at 118°",
+    "自接触面起；留空 = 螺栓伸入与可用孔深的较小值；参与 R11 校核":
+        "From the contact face; blank = lesser of bolt insertion and usable hole depth; used in R11",
+    "完整内螺纹深度须 ≤ 可用圆柱孔深": "Full internal thread depth must not exceed the usable cylindrical hole depth",
+    "内外螺纹须有正的重叠旋合长度": "Internal and external threads must have positive engagement overlap",
+    "盲孔钻尖深度须小于内螺纹件厚度 H；通孔请选择通孔类型":
+        "Blind drill-tip depth must be less than tapped part thickness H; select through hole for an open hole",
+    "螺栓不得顶底：伸入长度须小于盲孔圆柱深度（不含钻尖）":
+        "Bolt must not bottom out: insertion must be less than blind cylindrical depth (excluding the drill tip)",
+    "没有匹配的头部目录尺寸，已切换为自定义；请输入头部尺寸，留空时绘图使用估算值。":
+        "No matching head geometry in the catalog; switched to custom. Enter head dimensions; blank drawing sizes are estimates.",
+    "ESV 解析几何（留空尺寸为估算）": "Resolved ESV geometry (blank dimensions are estimates)",
+    "盲孔 Lh 含 118° 钻尖；通孔 Lh = H；实际旋合取内外螺纹重叠并受 mges 限制，红色段与 R11 一致。":
+        "Blind Lh includes a 118° drill tip; through Lh = H. Actual thread overlap is capped by mges; the red segment matches R11.",
+    "DSV: min(m, l − lK); ESV: min(l − lK, Lt) − max(0, l − b − lK)，再受 mges 限制":
+        "DSV: min(m, l − lK); ESV: min(l − lK, Lt) − max(0, l − b − lK), capped by mges",
     "通孔直径 dh": "Hole diameter dh",
     "倒角直径 dha": "Chamfer diameter dha",
     "外径 DA": "Outer diameter DA",

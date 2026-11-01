@@ -192,6 +192,20 @@ class GeneralRegressionTests(unittest.TestCase):
 
 
 class GeneralEngineBehaviourTests(unittest.TestCase):
+    def test_tapped_thread_depth_changes_r11_but_not_clamp_or_compliance(self):
+        payload = b1_payload()
+        original = run(payload)
+        payload["tapped"]["thread_depth"] = 4.0
+        shorter = run(payload)
+        self.assertEqual(original.check("mges").status, ResultStatus.PASS)
+        self.assertEqual(shorter.check("mges").status, ResultStatus.FAIL)
+        self.assertEqual(shorter.check("mges").value, 4.0)
+        self.assertEqual(shorter.metrics.engagement_length, 4.0)
+        self.assertEqual(shorter.value("mvorh"), 4.0)
+        self.assertEqual(original.check("mges").required, shorter.check("mges").required)
+        for symbol in ("lK", "δS", "δP", "FMzul", "MA"):
+            self.assertEqual(original.value(symbol), shorter.value(symbol))
+
     def test_bearing_friction_changes_only_bearing_torque_not_thread_stress(self):
         payload = default_input_json()
         baseline = run(payload)

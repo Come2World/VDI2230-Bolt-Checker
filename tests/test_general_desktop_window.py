@@ -341,6 +341,94 @@ class GeneralWindowTests(unittest.TestCase):
         self.assertTrue(window.canvas.find_withtag("dim-dW"))
         self.assertIn("ISO4762-M16x2.0", window.report())
 
+    def test_head_type_widget_loads_socket_dimensions_and_preserves_manual_overrides(self):
+        window = self.window
+        window._vars["bolt.yield_strength"].set("650")
+        self.set_choice("bolt.head_type", "socket")
+        for path, text in (("bolt.head_diameter", "18"), ("bolt.socket_size", "10"), ("bolt.socket_depth", "6")):
+            self.assertEqual(window._vars[path].get(), text)
+            self.assertTrue(window.is_field_visible(path))
+        self.assertEqual(window.model.values["bolt.catalog_variant_id"], "ISO4762-M12x1.75")
+        window._vars["bolt.head_diameter"].set("19")
+        window._vars["bolt.length"].set("75")
+        self.finish_scheduled_calculation()
+        self.assertTrue(window.outcome.ok, window.outcome.error)
+        self.assertEqual(window._vars["bolt.head_diameter"].get(), "19")
+        self.assertEqual(window._vars["bolt.yield_strength"].get(), "650")
+        self.set_choice("bolt.head_type", "hex")
+        self.assertTrue(window.is_field_visible("bolt.head_width_across_flats"))
+        self.assertFalse(window.is_field_visible("bolt.socket_size"))
+
+    def test_missing_head_geometry_notice_clears_after_matching_selection(self):
+        window = self.window
+        window.set_language("en")
+        self.set_choice("bolt.catalog_variant_id", "ISO4014-M18x2.5")
+        self.set_choice("bolt.head_type", "socket")
+        self.assertIsNone(window.model.values["bolt.catalog_variant_id"])
+        self.assertIn("No matching head geometry", window.status_var.get())
+        self.set_choice("bolt.head_type", "hex")
+        self.assertIsNone(window._edit_notice)
+        self.assertEqual(window.model.values["bolt.catalog_variant_id"], "ISO4014-M18x2.5")
+
+    def test_esv_geometry_edits_redraw_and_bottoming_errors_recover(self):
+        window = self.window
+        window.set_language("en")
+        self.set_choice("joint.type", "ESV")
+        for path, value in (("tapped.thickness", "50"), ("tapped.hole_depth", "40"), ("tapped.thread_depth", "25")):
+            window._vars[path].set(value)
+        self.finish_scheduled_calculation()
+        self.assertTrue(window.outcome.ok, window.outcome.error)
+        for path, value, role, text in (
+            ("tapped.thickness", "55", "dim-H", "H 55"),
+            ("tapped.hole_depth", "42", "dim-Lh", "Lh 42"),
+            ("tapped.thread_depth", "20", "dim-Lt", "Lt 20"),
+            ("tapped.engagement_length", "12", "dim-mges", "mges 12"),
+        ):
+            with self.subTest(path=path):
+                window._vars[path].set(value)
+                self.finish_scheduled_calculation()
+                self.assertTrue(window.outcome.ok, window.outcome.error)
+                labels = [window.canvas.itemcget(i, "text") for i in window.canvas.find_withtag(role)
+                          if window.canvas.type(i) == "text"]
+                self.assertIn(text, labels)
+        self.assertEqual(window.outcome.result.check("mges").value, 12.0)
+        self.assertTrue(window.canvas.find_withtag("engaged-thread"))
+        self.assertNotRegex(window.report(), r"[\u4e00-\u9fff]")
+        window._vars["tapped.hole_depth"].set("31")
+        self.finish_scheduled_calculation()
+        self.assertFalse(window.outcome.ok)
+        self.assertTrue(any("bottom out" in error.message for error in window.outcome.field_errors))
+        self.assertTrue(window.canvas.find_withtag("stale"))
+        window._vars["tapped.hole_depth"].set("42")
+        self.set_choice("tapped.hole_type", "through")
+        self.assertFalse(window.is_field_visible("tapped.hole_depth"))
+        window._vars["tapped.thickness"].set("22")
+        self.finish_scheduled_calculation()
+        self.assertTrue(window.outcome.ok, window.outcome.error)
+        self.assertFalse(window.canvas.find_withtag("dim-Lh"))
+        self.assertIn("Lh = 22", window.report())
+
+    def test_real_esv_canvas_clicks_focus_engagement_and_depth_fields(self):
+        window = self.window
+        self.root.deiconify()
+        self.root.geometry("1280x720+40+80")
+        self.set_choice("joint.type", "ESV")
+        self.root.update()
+        window.calculate_now()
+        self.root.update()
+        for role, field in (("engaged-thread", "tapped.engagement_length"),
+                            ("dim-H", "tapped.thickness"), ("dim-Lh", "tapped.hole_depth"),
+                            ("dim-Lt", "tapped.thread_depth"), ("dim-mges", "tapped.engagement_length")):
+            window.input_tabs.select(window._tab_index["load"])
+            self.root.update()
+            line = next(i for i in window.canvas.find_withtag(role) if window.canvas.type(i) == "line")
+            x0, y0, x1, y1 = window.canvas.coords(line)
+            with mock.patch.object(window, "go_to_field", wraps=window.go_to_field) as focus:
+                window.canvas.event_generate("<Button-1>", x=round((x0 + x1) / 2), y=round((y0 + y1) / 2))
+                self.root.update()
+                focus.assert_called_once_with(field)
+            self.assertEqual(window.input_tabs.index("current"), window._tab_index["bolt"])
+
     def test_a2_grade_errors_recovery_and_bilingual_fatigue_review(self):
         window = self.window
         self.set_choice("bolt.property_class", "A2-90")

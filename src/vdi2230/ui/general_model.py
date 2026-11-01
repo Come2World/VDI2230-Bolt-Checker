@@ -94,7 +94,9 @@ def relevant(path: str, values: dict[str, Any]) -> bool:
     if path.startswith(("nut.", "nut_washer.")):
         return values.get("joint.type") == "DSV"
     if path.startswith("tapped."):
-        return values.get("joint.type") == "ESV"
+        return values.get("joint.type") == "ESV" and (
+            path != "tapped.hole_depth" or values.get("tapped.hole_type") != "through"
+        )
     if path == "bolt.head_width_across_flats":
         return values.get("bolt.head_type") == "hex"
     if path in ("bolt.head_diameter", "bolt.socket_size", "bolt.socket_depth"):
@@ -294,6 +296,8 @@ class GeneralFormModel:
         message = "规格或等级改变，部分产品专用强度输入已清除，请核对后重新输入。" if cleared_product_input else None
         if path in CATALOG_PATHS:
             return self.apply_catalog(force=True) or message
+        if path == "bolt.head_type" and previous != value:
+            return self._apply_head_type()
         if path == "bolt.length" and self.values.get("bolt.catalog_variant_id"):
             return self.apply_catalog(force=False)
         section, name = path.split(".")
@@ -302,6 +306,35 @@ class GeneralFormModel:
         if path == "bolt.d":
             self.refresh_washer_estimates()
         return message
+
+    def _apply_head_type(self) -> str | None:
+        candidates = [
+            variant for variant in engineering_data.bolt_variants()
+            if variant.head_type == self.values["bolt.head_type"]
+            and variant.nominal_diameter == self.values["bolt.d"]
+            and variant.pitch == self.values["bolt.pitch"]
+        ]
+        length = self.values["bolt.length"]
+        if not candidates or isinstance(length, bool) or not isinstance(length, (int, float)) or not math.isfinite(length) or length <= 0:
+            self.values["bolt.catalog_variant_id"] = None
+            self.prov.pop("bolt.catalog_variant_id", None)
+            for path in engineering_data.CATALOG_GEOMETRY_PATHS:
+                if self.prov.get(path, "").startswith("catalog:"):
+                    self.prov.pop(path, None)
+            return "没有匹配的头部目录尺寸，已切换为自定义；请输入头部尺寸，留空时绘图使用估算值。"
+        variant = candidates[0]
+        values = engineering_data.bolt_geometry_values(variant.variant_id, length)
+        self.values["bolt.catalog_variant_id"] = variant.variant_id
+        self.prov.pop("bolt.catalog_variant_id", None)
+        for path, value in values.items():
+            # Head dimensions must match the new type; retain manually edited non-head geometry.
+            if path.startswith("bolt.head_") or path.startswith("bolt.socket_") or self.prov.get(path, "").startswith("catalog:"):
+                self.values[path] = value
+                self.prov[path] = f"catalog:{variant.variant_id}"
+        for path in engineering_data.CATALOG_GEOMETRY_PATHS:
+            if self.prov.get(path, "").startswith("catalog:"):
+                self.prov[path] = f"catalog:{variant.variant_id}"
+        return None
 
     def refresh_washer_estimates(self) -> None:
         diameter = self.values.get("bolt.d")
@@ -322,13 +355,17 @@ class GeneralFormModel:
         variant = self.values.get("bolt.catalog_variant_id")
         property_class = self.values.get("bolt.property_class")
         length = self.values.get("bolt.length")
-        if not variant or not property_class or isinstance(length, bool) or not isinstance(length, (int, float)):
+        if not variant or isinstance(length, bool) or not isinstance(length, (int, float)):
             return None
         if not math.isfinite(length) or length <= 0:
             return None
         try:
-            values = engineering_data.bolt_catalog_values(variant, float(length), property_class)
-            sources = engineering_data.catalog_value_sources(variant, property_class)
+            if property_class:
+                values = engineering_data.bolt_catalog_values(variant, float(length), property_class)
+                sources = engineering_data.catalog_value_sources(variant, property_class)
+            else:
+                values = engineering_data.bolt_geometry_values(variant, float(length))
+                sources = {path: f"catalog:{variant}" for path in values}
         except (KeyError, ValueError, StopIteration):
             return f"目录中没有 {variant} / {property_class} 的组合。"
         for path, value in values.items():

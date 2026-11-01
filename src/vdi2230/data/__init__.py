@@ -357,9 +357,23 @@ def bolt_catalog_values(
     property_class: str,
 ) -> dict[str, float | str | None]:
     """Catalog-first values for the general input, keyed by input path."""
-    variant = bolt_variant(variant_id)
-    strength = property_class_record(property_class, variant.nominal_diameter)
+    strength = property_class_record(property_class, bolt_variant(variant_id).nominal_diameter)
     ratio = shear_strength_ratio(property_class)
+    return {
+        **bolt_geometry_values(variant_id, length),
+        "bolt.youngs_modulus": (
+            material(A2_MODULUS_MATERIAL_ID).youngs_modulus
+            if is_a2_bolt_class(property_class) else STEEL_YOUNGS_MODULUS_MPA
+        ),
+        "bolt.yield_strength": strength.yield_strength,
+        "bolt.tensile_strength": strength.tensile_strength,
+        "bolt.shear_ratio": ratio,
+    }
+
+
+def bolt_geometry_values(variant_id: str, length: float) -> dict[str, float | str | None]:
+    """Geometry independent of material and property class."""
+    variant = bolt_variant(variant_id)
     return {
         "bolt.head_type": variant.head_type,
         "bolt.d": variant.nominal_diameter,
@@ -375,13 +389,6 @@ def bolt_catalog_values(
         "bolt.socket_depth": variant.socket_depth,
         "bolt.thread_length": variant.thread_length_for(length),
         "bolt.shank_diameter": variant.nominal_diameter,
-        "bolt.youngs_modulus": (
-            material(A2_MODULUS_MATERIAL_ID).youngs_modulus
-            if is_a2_bolt_class(property_class) else STEEL_YOUNGS_MODULUS_MPA
-        ),
-        "bolt.yield_strength": strength.yield_strength,
-        "bolt.tensile_strength": strength.tensile_strength,
-        "bolt.shear_ratio": ratio,
         "joint.hole_diameter": variant.clearance_holes[1],
         "nut.height": variant.nut_height,
         "nut.bearing_diameter": variant.nut_bearing_diameter,

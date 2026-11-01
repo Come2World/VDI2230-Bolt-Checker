@@ -25,6 +25,74 @@ def error_paths(payload: dict) -> set[str]:
 
 
 class GeneralInputParsingTests(unittest.TestCase):
+    def esv_payload(self):
+        payload = default_input_json()
+        payload["joint"]["type"] = "ESV"
+        return payload
+
+    def test_tapped_geometry_is_backward_compatible_and_round_trips(self):
+        payload = self.esv_payload()
+        for name in ("hole_type", "thickness", "hole_depth", "thread_depth"):
+            payload["tapped"].pop(name)
+        item = parse_general_input(payload)
+        self.assertEqual(item.tapped.hole_type, "blind")
+        self.assertEqual(item.tapped_geometry.engagement_length, 30.0)
+        payload = item.to_json()
+        payload["tapped"].update(thickness=45.0, hole_depth=38.0, thread_depth=20.0)
+        item = parse_general_input(payload)
+        self.assertEqual(item.tapped_geometry.engagement_length, 20.0)
+        self.assertEqual(item.clamp_length, 40.0)
+        self.assertEqual(parse_general_input(item.to_json()), item)
+
+    def test_blind_depth_relations_reject_bottoming_and_thread_beyond_drill(self):
+        for changes, path in (
+            ({"thickness": 35, "hole_depth": 35}, "tapped.hole_depth"),
+            ({"thickness": 40, "hole_depth": 32}, "bolt.length"),
+            ({"thickness": 40, "hole_depth": 35, "thread_depth": 34}, "tapped.thread_depth"),
+        ):
+            with self.subTest(changes=changes):
+                payload = self.esv_payload()
+                payload["tapped"].update(changes)
+                self.assertIn(path, error_paths(payload))
+        payload = self.esv_payload()
+        payload["tapped"]["hole_depth"] = 35.0
+        cylinder = parse_general_input(payload).tapped_geometry.cylindrical_depth
+        payload["bolt"]["length"] = 40.0 + cylinder
+        self.assertIn("bolt.length", error_paths(payload))
+
+    def test_through_hole_allows_protrusion_and_limits_threads_to_thickness(self):
+        payload = self.esv_payload()
+        payload["tapped"].update(hole_type="through", thickness=15.0)
+        item = parse_general_input(payload)
+        self.assertEqual(item.tapped_geometry.hole_depth, 15.0)
+        self.assertEqual(item.tapped_geometry.thread_depth, 15.0)
+        self.assertEqual(item.tapped_geometry.engagement_length, 15.0)
+        payload["tapped"]["thread_depth"] = 16.0
+        self.assertIn("tapped.thread_depth", error_paths(payload))
+
+    def test_thread_overlap_respects_shank_start_and_manual_engagement_limit(self):
+        payload = self.esv_payload()
+        payload["bolt"]["thread_length"] = 20.0
+        payload["tapped"].update(thread_depth=22.0, engagement_length=18.0)
+        item = parse_general_input(payload)
+        self.assertEqual(item.tapped_geometry.engagement_start, 10.0)
+        self.assertEqual(item.tapped_geometry.engagement_length, 12.0)
+        payload["tapped"]["engagement_length"] = 8.0
+        self.assertEqual(parse_general_input(payload).tapped_geometry.engagement_length, 8.0)
+        payload["tapped"]["thread_depth"] = 10.0
+        self.assertIn("tapped.thread_depth", error_paths(payload))
+
+    def test_tapped_dimensions_reject_invalid_values(self):
+        for name in ("thickness", "hole_depth", "thread_depth"):
+            for invalid in (0, -1, True, "nan", float("inf"), "invalid"):
+                with self.subTest(field=name, value=invalid):
+                    payload = self.esv_payload()
+                    payload["tapped"][name] = invalid
+                    self.assertIn(f"tapped.{name}", error_paths(payload))
+        payload = self.esv_payload()
+        payload["tapped"]["hole_type"] = "unknown"
+        self.assertIn("tapped.hole_type", error_paths(payload))
+
     def test_default_round_trip(self) -> None:
         item = parse_general_input(default_input_json())
         self.assertIsInstance(item, GeneralInput)

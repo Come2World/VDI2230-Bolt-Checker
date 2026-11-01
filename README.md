@@ -106,6 +106,11 @@ geometry is independent of the property class; selecting an ISO 4762 variant
 switches the head type to socket and fills dk, k, socket size s, socket depth
 t and its own dW. The nut stays an ISO 4032 hexagon nut. Catalog values are
 editable; overrides survive bolt-length changes.
+Changing **Head type** also selects matching geometry at the current diameter
+and pitch and fills the head dimensions, without overwriting manual strength
+inputs. Geometry can be filled without selecting a property class. If no
+matching head exists in the catalog, the UI explicitly switches to custom
+geometry and requests dimensions instead of retaining an incompatible variant.
 
 The head bearing diameter **dW** drives the R10 bearing area
 `Ap = π/4·(dW²−dha²)`, the deformation-cone start diameter (βL = lP/dW,
@@ -116,6 +121,32 @@ bearing face with a dimension line, and the effective bearing annulus
 highlighted under the head and nut. Head s, dk and socket sizes are
 drawing-only; blank or inconsistent values are estimated from dW. Suggested lengths and
 geometry/class combinations do not guarantee commercial availability.
+
+### ESV tapped-part geometry
+
+The Bolt tab's **Tapped part (ESV)** section supports blind and through holes,
+part thickness **H**, drilled depth **Lh** (blind holes only) and complete
+internal-thread depth **Lt**, all in mm. Depths start at the tapped part's
+contact face. H is **not** added to grip length lK.
+
+- Blank blind-hole Lh is estimated as `l − lK + 0.4d`; H is estimated as
+  `max(l − lK + d, Lh + 0.5d)`. Lh includes an estimated 118° drill tip.
+  The cylindrical depth excludes that tip. The bolt must not bottom out,
+  Lt cannot exceed the cylindrical depth, and Lh must be less than H.
+- Through holes use `Lh = H` and allow the bolt to protrude. Blank H is
+  estimated as `l − lK + 0.5d`; Lt cannot exceed H.
+- Blank Lt is the lesser of insertion and cylindrical depth. Actual engagement
+  is the overlap of the internal and external threads, additionally capped
+  by the optional **mges** input. A shorter Lt reduces the R11 available
+  engagement; zero overlap is an input error.
+- The section shows the part boundary, hole/drill tip, thread-depth limit,
+  and H/Lh/Lt/mges dimensions. Engaged thread lines are **red** and their length
+  matches R11; clicking them or a dimension focuses the corresponding input.
+  The report lists resolved dimensions and identifies blank dimensions as
+  estimates. Older inputs without these fields preserve their engagement.
+
+Estimates are starting geometry, not verified manufacturing dimensions;
+replace them with actual part and hole measurements for design checks.
 
 | Class | Minimum Rm / Rp0.2 | τB/Rm | Reference |
 |---|---:|---:|---|

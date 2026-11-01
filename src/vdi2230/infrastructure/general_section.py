@@ -34,6 +34,7 @@ CONE_FILL = "#be85ff"
 INTERFACE_STROKE = "#dc8aff"
 DIMENSION_STROKE = "#83def5"
 BEARING_STROKE = "#ffd166"
+ENGAGEMENT_STROKE = "#ff4d6d"
 TEXT_FILL = "#d6efff"
 MUTED_TEXT = "#89abc5"
 
@@ -65,6 +66,10 @@ def section_target(role: str) -> str:
         "nut": "nut.height", "label-nut": "nut.height", "tapped": "tapped.material_id",
         "bearing-head": "bolt.head_bearing_diameter", "dim-dW": "bolt.head_bearing_diameter",
         "bearing-nut": "nut.bearing_diameter",
+        "engaged-thread": "tapped.engagement_length", "dim-mges": "tapped.engagement_length",
+        "dim-H": "tapped.thickness", "dim-Lh": "tapped.hole_depth",
+        "dim-Lt": "tapped.thread_depth", "tapped-hole": "tapped.hole_type",
+        "tapped-thread": "tapped.thread_depth",
         "washer-head": "head_washer.thickness", "washer-nut": "nut_washer.thickness",
     }.get(role, "")
 
@@ -180,13 +185,13 @@ def general_section_shapes(
     if dsv:
         below = max(bolt.length, clamp + nut.height)
     else:
-        below = max(bolt.length + 0.4 * bolt.d, clamp + metrics.engagement_length + 0.5 * bolt.d)
+        below = max(bolt.length, clamp + item.tapped_geometry.thickness)
     total_mm = bolt.head_height + below
     across_mm = max(joint.outer_diameter, head_width, nut_width if dsv else 0.0,
                     *(washer.outer_diameter for side in ("head", "nut") if (washer := item.washer_at(side))))
 
     pad = 12.0
-    left_band = min(64.0, width * 0.15)
+    left_band = min(64.0, width * 0.15) if dsv else min(132.0, width * 0.28)
     label_band = min(max(width * 0.32, 95.0), 230.0)
     top_band, bottom_band = 64.0, 40.0
     gx0, gx1 = pad + left_band, width - pad - label_band
@@ -210,9 +215,29 @@ def general_section_shapes(
     y_end = y(below)
 
     if not dsv:
+        geometry = item.tapped_geometry
+        shapes.extend(_hatched_rect(
+            cx - half(joint.outer_diameter), y(clamp), cx + half(joint.outer_diameter),
+            y(clamp + geometry.thickness), TAPPED_FILL, "tapped", reverse=True,
+        ))
+        drill_diameter = geometry.drill_diameter
+        hole = (cx - half(drill_diameter), y(clamp),
+                cx - half(drill_diameter), y(clamp + geometry.cylindrical_depth))
+        if item.tapped.hole_type == "blind":
+            hole += (cx, y(clamp + geometry.hole_depth))
+        hole += (cx + half(drill_diameter), y(clamp + geometry.cylindrical_depth),
+                 cx + half(drill_diameter), y(clamp))
+        shapes.append(Shape("polygon", hole, fill=DRAWING_BACKGROUND, stroke=PLATE_STROKE, role="tapped-hole"))
+        for sign in (-1, 1):
+            shapes.append(Shape(
+                "line", (cx + sign * half(bolt.d), y(clamp),
+                         cx + sign * half(bolt.d), y(clamp + geometry.thread_depth)),
+                stroke=PLATE_STROKE, role="tapped-thread", stroke_width=0.7,
+            ))
         shapes.append(Shape(
-            "rect", (cx - half(joint.outer_diameter), y(clamp), cx + half(joint.outer_diameter), y_end),
-            fill=TAPPED_FILL, stroke=PLATE_STROKE, role="tapped",
+            "line", (cx - half(bolt.d), y(clamp + geometry.thread_depth),
+                     cx + half(bolt.d), y(clamp + geometry.thread_depth)),
+            stroke=PLATE_STROKE, role="tapped-thread", dash=True,
         ))
 
     boundaries = [item.head_washer_thickness]
@@ -317,6 +342,16 @@ def general_section_shapes(
             fill=BOLT_FILL, stroke=BOLT_STROKE, role="nut", stroke_width=1.4,
         ))
         shapes.extend(_bearing_ring(cx, y(clamp), item.bearing_inner("nut") * scale, item.bearing_outer("nut") * scale, "bearing-nut"))
+    else:
+        geometry = item.tapped_geometry
+        start = clamp + geometry.engagement_start
+        end = start + metrics.engagement_length
+        for sign in (-1, 1):
+            for diameter, line_width in ((bolt.d, 2.2), (bolt.d3, 1.0)):
+                shapes.append(Shape(
+                    "line", (cx + sign * half(diameter), y(start), cx + sign * half(diameter), y(end)),
+                    stroke=ENGAGEMENT_STROKE, stroke_width=line_width, role="engaged-thread",
+                ))
 
     shapes.append(Shape("line", (cx, y_top - 6, cx, y_end + 6), stroke=MUTED_TEXT,
                         role="axis", dash_pattern=(12, 4, 2, 4), stroke_width=0.8))
@@ -359,7 +394,7 @@ def _dimension(x0: float, y0: float, x1: float, y1: float, text: str, role: str,
 
 def _dimensions(item, metrics, cx, y, half, gx0, gy1) -> list[Shape]:
     clamp = metrics.clamp_length
-    step = min(20.0, (gx0 - 14) / 3)
+    step = min(20.0, (gx0 - 14) / (3 if item.is_through_bolt else 6))
     shapes = _dimension(gx0 - 8 - step, y(0.0), gx0 - 8 - step, y(clamp), f"lK {_fmt(clamp)}", "dim-lK", True)
     shapes += _dimension(gx0 - 8 - 2 * step, y(0.0), gx0 - 8 - 2 * step, y(item.bolt.length), f"l {_fmt(item.bolt.length)}", "dim-l", True)
     depth = item.head_washer_thickness
@@ -368,6 +403,23 @@ def _dimensions(item, metrics, cx, y, half, gx0, gy1) -> list[Shape]:
             shapes += _dimension(gx0 - 8, y(depth), gx0 - 8, y(depth + layer.thickness),
                                  f"t{index + 1} {_fmt(layer.thickness)}", f"dim-t{index + 1}", True)
         depth += layer.thickness
+    if not item.is_through_bolt:
+        geometry = item.tapped_geometry
+        lower_dimensions = [
+            (5, geometry.thickness, f"H {_fmt(geometry.thickness)}", "dim-H"),
+            (3, geometry.thread_depth, f"Lt {_fmt(geometry.thread_depth)}", "dim-Lt"),
+        ]
+        if item.tapped.hole_type == "blind":
+            lower_dimensions.append((4, geometry.hole_depth, f"Lh {_fmt(geometry.hole_depth)}", "dim-Lh"))
+        for column, length, text, role in lower_dimensions:
+            x = gx0 - 8 - column * step
+            shapes += _dimension(x, y(clamp), x, y(clamp + length), text, role, True)
+            for level in (clamp, clamp + length):
+                shapes.append(Shape("line", (x - 4, y(level), cx - half(item.joint.outer_diameter), y(level)),
+                                    stroke=DIMENSION_STROKE, role=role, dash=True, stroke_width=0.5))
+        start = clamp + geometry.engagement_start
+        shapes += _dimension(gx0 - 8, y(start), gx0 - 8, y(start + metrics.engagement_length),
+                             f"mges {_fmt(metrics.engagement_length)}", "dim-mges", True)
     head_top = y(-item.bolt.head_height)
     dw = item.bolt.head_bearing_diameter
     shapes += _dimension(cx - half(dw), head_top - 16, cx + half(dw), head_top - 16, f"dW {_fmt(dw)}", "dim-dW", False)
@@ -444,7 +496,7 @@ def _labels(item, metrics, cx, y, half, head_width, nut_width, label_x, top_limi
         entries.append((
             y(clamp + metrics.engagement_length / 2), cx + half(item.joint.outer_diameter),
             f"{t('内螺纹件')} · {material}",
-            f"{t('旋合')} {_fmt(metrics.engagement_length)} · μG {_fmt(bolt.thread_friction)}",
+            f"{t('旋合')} {_fmt(metrics.engagement_length)} · H {_fmt(item.tapped_geometry.thickness)} · {t('盲孔' if tapped.hole_type == 'blind' else '通孔')}",
             t("内螺纹"), "tapped",
         ))
 
