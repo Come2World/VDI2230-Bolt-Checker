@@ -6,6 +6,7 @@ from vdi2230 import data as engineering_data
 from vdi2230.domain.general_inputs import (
     FIELD_SPECS,
     LAYER_SPECS,
+    LEGACY_SCHEMA_ID,
     MAX_LAYERS,
     SCHEMA_ID,
     GeneralInput,
@@ -33,6 +34,16 @@ class GeneralInputParsingTests(unittest.TestCase):
         again = GeneralInput.from_json(json.loads(json.dumps(item.to_json())))
         self.assertEqual(again, item)
 
+    def test_schema_3_inputs_migrate_to_schema_4_without_reinterpreting_fatigue(self) -> None:
+        payload = default_input_json()
+        payload["schema"] = LEGACY_SCHEMA_ID
+        del payload["bolt"]["fatigue_strength_amplitude"]
+        item = parse_general_input(payload)
+        self.assertIsNone(item.bolt.fatigue_strength_amplitude)
+        self.assertEqual(item.to_json()["schema"], SCHEMA_ID)
+        payload["bolt"]["fatigue_strength_amplitude"] = 50
+        self.assertIn("bolt.fatigue_strength_amplitude", error_paths(payload))
+
     def test_default_values_come_from_catalog_and_materials(self) -> None:
         payload = default_input_json()
         catalog = engineering_data.bolt_catalog_values(
@@ -58,6 +69,54 @@ class GeneralInputParsingTests(unittest.TestCase):
         item = parse_general_input(payload)
         self.assertEqual(item.bolt.length, 70.0)
         self.assertIsNone(item.bolt.thread_length)
+
+    def test_a2_90_requires_product_specific_shear_ratio(self) -> None:
+        payload = default_input_json()
+        payload["bolt"].update(property_class="A2-90", shear_ratio=None)
+        with self.assertRaises(InputValidationError) as raised:
+            parse_general_input(payload)
+        error = next(error for error in raised.exception.errors if error.path == "bolt.shear_ratio")
+        self.assertIn("A2-90", error.message)
+        self.assertIn("实际产品", error.message)
+        payload["provenance"] = {}
+        payload["bolt"]["shear_ratio"] = 0.7
+        self.assertEqual(parse_general_input(payload).bolt.shear_ratio, 0.7)
+        del payload["bolt"]["shear_ratio"]
+        self.assertIn("bolt.shear_ratio", error_paths(payload))
+
+    def test_a2_rejects_stale_strength_and_shear_provenance(self) -> None:
+        payload = default_input_json()
+        payload["bolt"]["property_class"] = "A2-70"
+        self.assertTrue({"bolt.yield_strength", "bolt.tensile_strength", "bolt.shear_ratio"} <= error_paths(payload))
+        payload["bolt"]["property_class"] = "A2-90"
+        self.assertIn("bolt.shear_ratio", error_paths(payload))
+        payload["bolt"]["property_class"] = "a2-90"
+        payload["bolt"]["shear_ratio"] = None
+        self.assertIn("bolt.shear_ratio", error_paths(payload))
+        payload["bolt"]["property_class"] = "A2-70"
+        del payload["bolt"]["shear_ratio"]
+        self.assertIn("bolt.shear_ratio", error_paths(payload))
+
+    def test_a2_rejects_mismatched_catalog_variant_sources(self) -> None:
+        payload = default_input_json()
+        payload["bolt"]["property_class"] = "A2-70"
+        variant = "ISO4014-M12x1.75"
+        for path, value in engineering_data.bolt_catalog_values(variant, 70, "A2-70").items():
+            section, name = path.split(".")
+            payload[section][name] = value
+        payload["provenance"].update(engineering_data.catalog_value_sources(variant, "A2-70"))
+        payload["bolt"]["catalog_variant_id"] = "ISO4017-M12x1.75"
+        self.assertIn("bolt.catalog_variant_id", error_paths(payload))
+
+    def test_fatigue_amplitude_is_optional_and_must_be_positive(self) -> None:
+        payload = default_input_json()
+        self.assertIsNone(parse_general_input(payload).bolt.fatigue_strength_amplitude)
+        for invalid in (0, -1, True, "nan", float("inf")):
+            with self.subTest(value=invalid):
+                payload["bolt"]["fatigue_strength_amplitude"] = invalid
+                self.assertIn("bolt.fatigue_strength_amplitude", error_paths(payload))
+        payload["bolt"]["fatigue_strength_amplitude"] = "55.5"
+        self.assertEqual(parse_general_input(payload).bolt.fatigue_strength_amplitude, 55.5)
 
     def test_field_errors_report_paths(self) -> None:
         payload = default_input_json()

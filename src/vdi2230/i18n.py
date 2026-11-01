@@ -86,6 +86,8 @@ MESSAGES = {
     "全部校核满足要求。": "All checks meet the requirements.",
     "计算校核均满足要求，但数据或模型假设待核验，结果不得作为最终结论。":
         "All checks meet the requirements, but data or model assumptions remain unverified. Results are not final.",
+    "部分校核、数据或模型假设待核验，结果不得作为最终结论。":
+        "Some checks, data, or model assumptions require review. Results are not final.",
     "剖面未更新：请先修正标红输入": "Section not updated: correct the highlighted inputs first",
     "自定义": "Custom",
     "自定义（手动输入）": "Custom (manual)",
@@ -122,11 +124,47 @@ MESSAGES = {
     "抗拉强度 Rm": "Tensile strength Rm",
     "最大抗拉强度 Rm,max": "Max. strength Rm,max",
     "剪切强度比 τB/Rm": "Shear strength ratio τB/Rm",
+    "产品疲劳强度幅 σA": "Product fatigue strength amplitude σA",
+    "按实际螺栓、工况和寿命输入；用于 SD，不再套用默认疲劳公式":
+        "Enter the actual bolt fatigue strength amplitude for the conditions and life; used directly for SD.",
+    "非 A2 留空 = 1.2·Rm；A2 螺纹脱扣校核须输入实际值":
+        "For non-A2 bolts, blank = 1.2·Rm; A2 thread-stripping checks require the actual value.",
+    "非 A2 留空 = 螺栓 Rm；A2 非标准螺母须输入实际值":
+        "For non-A2 bolts, blank = bolt Rm; A2 nonstandard nuts require the actual value.",
     "螺纹滚压": "Thread rolling",
     "螺纹摩擦 μG": "Thread friction μG",
     "支承摩擦 μK": "Bearing friction μK",
     "独立输入；拧紧侧螺栓头/螺母与垫片或板面的摩擦":
         "Independent input; friction between the rotating head/nut and the washer or plate.",
+    "A2-90 无默认剪切强度比，请按实际产品资料输入。":
+        "No default shear strength ratio is available for A2-90; enter it from the actual product data.",
+    "所选 A2 等级与强度来源不一致，请重新选择目录或手动填写。":
+        "The strength source does not match the selected A2 class; reselect the catalog or enter the value manually.",
+    "所选 A2 等级的剪切强度比与表 7 不符，请重新选择目录或手动填写。":
+        "The shear strength ratio does not match Table 7 for the selected A2 class; reselect the catalog or enter it manually.",
+    "目录 A2 强度不适用于该公称直径，请使用适用范围或手动输入强度。":
+        "The catalog A2 strengths do not cover this nominal diameter; use an in-range size or enter the strengths manually.",
+    "目录规格不存在或与保留的目录来源不一致，请重新选择或改为自定义。":
+        "The catalog variant is unknown or does not match the retained catalog sources; reselect it or use custom geometry.",
+    "产品疲劳强度幅需要输入格式 vdi2230.general/4。":
+        "A product fatigue strength amplitude requires input schema vdi2230.general/4.",
+    "规格或等级改变，部分产品专用强度输入已清除，请核对后重新输入。":
+        "The size or class changed; some product-specific strength inputs were cleared. Verify and re-enter them.",
+    "A2-90 目录强度参考富田螺子厂商 SUS304CUN 产品（M6、M8、M10、M12、M16、M20；JIS B1180）；须核验实际制造商、规格及强度，目录 ISO 几何不代表该产品。":
+        "A2-90 catalog strengths reference supplier Tomita Rashi's SUS304CUN products (M6, M8, M10, M12, M16, M20; JIS B1180). Verify the actual manufacturer, size, and strengths; ISO catalog geometry does not represent that product.",
+    "A2 螺栓疲劳强度幅需按实际产品及寿命输入；ISO 898-1 钢螺栓疲劳参考公式不适用。":
+        "Enter the A2 bolt fatigue strength amplitude for the actual product and life; the ISO 898-1 steel-bolt fatigue reference formula does not apply.",
+    "用户输入的疲劳强度幅须适用于实际螺栓、工况和寿命。":
+        "The entered fatigue strength amplitude must apply to the actual bolt, conditions, and life.",
+    "A2 螺纹脱扣校核需输入实际最大抗拉强度 Rm,max。":
+        "The A2 thread-stripping check requires the actual maximum tensile strength Rm,max.",
+    "A2 非标准螺母脱扣校核需输入螺母实际抗拉强度和剪切强度比。":
+        "The A2 nonstandard-nut stripping check requires the nut's actual tensile strength and shear strength ratio.",
+    "当前设置按匹配标准螺母免算 R11；请确认实际螺母材料及等级与 A2 螺栓匹配。":
+        "R11 is waived under the matching-standard-nut setting; confirm that the actual nut material and class match the A2 bolt.",
+    "输入疲劳强度幅": "Entered fatigue strength amplitude",
+    "用户输入（指定工况与寿命）": "User input (specified conditions and life)",
+    "螺栓输入: (τB/Rm)·Rm": "Bolt input: (τB/Rm)·Rm",
     "螺母高度 m": "Nut height m",
     "螺母支承直径 dW": "Nut bearing dW",
     "螺母对边 s": "Nut width across flats s",
@@ -425,6 +463,8 @@ TEMPLATES = {
     "与 π/4·((d2+d3)/2)² = {value} 偏差超过 15%": "Deviation from π/4·((d2+d3)/2)² = {value} exceeds 15%",
     "须大于夹紧长度 lK = {value}，留出旋合长度": "Must exceed grip length lK = {value} to allow thread engagement",
     "仅支持 {schema}；请分别确认螺栓的 thread_friction (μG) 和 bearing_friction (μK)": "Only {schema} is supported; confirm bolt thread_friction (μG) and bearing_friction (μK) independently",
+    "仅支持 {schema} 或 {legacy}；请分别确认螺栓的 thread_friction (μG) 和 bearing_friction (μK)":
+        "Only {schema} or {legacy} is supported; confirm bolt thread_friction (μG) and bearing_friction (μK) independently",
     "已计算 · {time}": "Calculated · {time}",
     "已导出 {name}": "Exported {name}",
     "板层 {index}": "Plate {index}",

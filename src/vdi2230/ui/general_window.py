@@ -16,6 +16,7 @@ from tkinter import font as tkfont
 from typing import Any, Callable
 from vdi2230.i18n import Language, format_text, language_code, translate
 
+from vdi2230.domain.models import ResultStatus
 from vdi2230.infrastructure.general_section import (
     DRAWING_BACKGROUND, MAX_VIEW, MIN_VIEW, MUTED_TEXT, PLATE_STROKE, TEXT_FILL, general_section_shapes,
 )
@@ -109,6 +110,7 @@ class GeneralWindow:
         self._choices: dict[str, tuple[dict[Any, str], dict[str, Any]]] = {}
         self._sections: list[tuple[ttk.Label, list[str]]] = []
         self._error_paths: list[str] = []
+        self._edit_notice: str | None = None
 
         root.title(self.t("VDI 2230 螺栓连接计算 · 通用"))
         geometry, min_size = fit_window(root.winfo_screenwidth(), root.winfo_screenheight())
@@ -519,6 +521,10 @@ class GeneralWindow:
         if self._syncing:
             return
         message = self.model.set_value(path, self._read(path, self.model.specs[path]))
+        if message:
+            self._edit_notice = message
+        elif path in (*CATALOG_PATHS, "bolt.fatigue_strength_amplitude", "bolt.tensile_strength_max"):
+            self._edit_notice = None
         if path in CATALOG_PATHS or path in ("bolt.length", "bolt.d") or path.endswith(".material_id"):
             self._sync(skip=path)
         self._update_marker(path)
@@ -684,7 +690,7 @@ class GeneralWindow:
         failing = [check.symbol for check in result.checks if check.status.value == "不通过"]
         detail = (
             f"不通过：{'、'.join(failing)}" if failing
-            else "计算校核均满足要求，但数据或模型假设待核验，结果不得作为最终结论。" if result.provisional_sources
+            else "部分校核、数据或模型假设待核验，结果不得作为最终结论。" if result.verdict is ResultStatus.NEEDS_REVIEW
             else "全部校核满足要求。"
         )
         self.banner.configure(text=f"{self.t('总体判定')}: {self.t(result.verdict_label)}\n{self.t(detail)}")
@@ -709,6 +715,8 @@ class GeneralWindow:
             for symbol, label in KEY_METRICS if symbol in by_symbol
         ))
         notes = list(result.warnings)
+        if self._edit_notice:
+            notes.insert(0, self._edit_notice)
         if result.provisional_sources:
             notes.insert(0, f"待核验数据来源 {len(result.provisional_sources)} 项，详见报告。")
         self.notes_var.set("\n".join(f"• {self.t(note)}" for note in notes))
@@ -736,7 +744,7 @@ class GeneralWindow:
         for path in self._rows:
             self._update_marker(path)
         self.export_button.state(["disabled"])
-        self.status_var.set(self.t("结果未更新"))
+        self.status_var.set(self.t(self._edit_notice or "结果未更新"))
         self._draw()
 
     def _fill_values(self) -> None:

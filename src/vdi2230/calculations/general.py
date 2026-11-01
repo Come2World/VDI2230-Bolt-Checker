@@ -279,6 +279,20 @@ def calculate_general(item: GeneralInput) -> GeneralCalculationResult:
 
     bolt, joint, nut, tapped = item.bolt, item.joint, item.nut, item.tapped
     load, assembly = item.load, item.assembly
+    a2_bolt = engineering_data.uses_a2_bolt(bolt.property_class, item.provenance)
+    supplier_note = (
+        "A2-90 目录强度参考富田螺子厂商 SUS304CUN 产品"
+        "（M6、M8、M10、M12、M16、M20；JIS B1180）；"
+        "须核验实际制造商、规格及强度，目录 ISO 几何不代表该产品。"
+    )
+    supplier_paths = [
+        path for path in sorted(engineering_data.STRENGTH_PATHS)
+        if item.provenance.get(path) == "class:A2-90"
+    ]
+    if supplier_paths:
+        for path in supplier_paths:
+            provisional[path] = f"default:{supplier_note}"
+        warnings.append(supplier_note)
     layers = item.plates
     dsv = item.is_through_bolt
     d, pitch, d2, d3 = bolt.d, bolt.pitch, bolt.d2, bolt.d3
@@ -439,23 +453,32 @@ def calculate_general(item: GeneralInput) -> GeneralCalculationResult:
 
     # R9 fatigue
     sigma_a = v.add("σa", "交变应力幅", phi * (load.axial_max - load.axial_min) / (2 * area_stress), "MPa", "R9/1")
-    sigma_asv = 0.85 * (150 / d + 45)
-    v.add("σASV", "疲劳极限 (SV)", sigma_asv, "MPa", "R9/5-1")
-    sigma_as = sigma_asv
-    if bolt.rolling == "SG":
-        f02 = area_stress * bolt.yield_strength
-        fsm = phi * (load.axial_max + load.axial_min) / 2 + fmzul
-        sigma_as = v.add("σASG", "疲劳极限 (SG)", max(2 - fsm / f02, 0.0) * sigma_asv, "MPa", "R9/5-2")
-    if load.cycles is not None and load.cycles < ND_CYCLES:
-        factor_sv = (ND_CYCLES / load.cycles) ** (1 / 3)
-        finite_sv = sigma_asv * factor_sv
+    sigma_as: float | None = None
+    if bolt.fatigue_strength_amplitude is not None:
+        sigma_as = v.add(
+            "σA,input", "输入疲劳强度幅", bolt.fatigue_strength_amplitude, "MPa",
+            "用户输入（指定工况与寿命）",
+        )
+        if sigma_a > 0:
+            warnings.append("用户输入的疲劳强度幅须适用于实际螺栓、工况和寿命。")
+    elif not a2_bolt:
+        sigma_asv = 0.85 * (150 / d + 45)
+        v.add("σASV", "疲劳极限 (SV)", sigma_asv, "MPa", "R9/5-1")
+        sigma_as = sigma_asv
         if bolt.rolling == "SG":
-            finite = max(sigma_as * (ND_CYCLES / load.cycles) ** (1 / 6), finite_sv)
-        else:
-            finite = finite_sv
-        sigma_as = v.add("σAZS", "有限寿命疲劳强度", finite, "MPa", "R9/6")
-    if d > 40:
-        warnings.append("d > 40 mm：R9/5 疲劳极限参考值需另行确认。")
+            f02 = area_stress * bolt.yield_strength
+            fsm = phi * (load.axial_max + load.axial_min) / 2 + fmzul
+            sigma_as = v.add("σASG", "疲劳极限 (SG)", max(2 - fsm / f02, 0.0) * sigma_asv, "MPa", "R9/5-2")
+        if load.cycles is not None and load.cycles < ND_CYCLES:
+            factor_sv = (ND_CYCLES / load.cycles) ** (1 / 3)
+            finite_sv = sigma_asv * factor_sv
+            if bolt.rolling == "SG":
+                finite = max(sigma_as * (ND_CYCLES / load.cycles) ** (1 / 6), finite_sv)
+            else:
+                finite = finite_sv
+            sigma_as = v.add("σAZS", "有限寿命疲劳强度", finite, "MPa", "R9/6")
+        if d > 40:
+            warnings.append("d > 40 mm：R9/5 疲劳极限参考值需另行确认。")
 
     # R10 surface pressure
     fv_max = fmzul - fz_force
@@ -480,7 +503,11 @@ def calculate_general(item: GeneralInput) -> GeneralCalculationResult:
             interface_positions = [item.head_washer_thickness]
         shear_area = min(area_shank if pos <= l1 + 1e-9 else area_d3 for pos in interface_positions)
         v.add("Aτ", "剪切面截面积", shear_area, "mm²", "R12/5")
-        tau_b = v.add("τB", "螺栓抗剪强度", bolt.shear_ratio * bolt.tensile_strength, "MPa", "表 7: (τB/Rm)·Rm")
+        shear_formula = (
+            "表 7: (τB/Rm)·Rm" if item.provenance.get("bolt.shear_ratio") == "table:shear_strength_ratio"
+            else "螺栓输入: (τB/Rm)·Rm"
+        )
+        tau_b = v.add("τB", "螺栓抗剪强度", bolt.shear_ratio * bolt.tensile_strength, "MPa", shear_formula)
         v.add("τQmax", "滑移时剪应力", load.transverse / shear_area, "MPa", "R12/5")
         sa = v.add("SA", "抗剪安全系数", tau_b * shear_area / load.transverse, "", "R12/7")
 
@@ -499,7 +526,11 @@ def calculate_general(item: GeneralInput) -> GeneralCalculationResult:
         SafetyCheck("FMzul", "预紧力 FMzul ≥ FMmax", fmzul, fmmax, "N", _status(fmzul, fmmax), "R7"),
         SafetyCheck("SF", "抗屈服安全系数", sf, req.SF, "", _status(sf, req.SF), "R8"),
     ]
-    if sigma_a > 0:
+    if sigma_a > 0 and sigma_as is None:
+        note = "A2 螺栓疲劳强度幅需按实际产品及寿命输入；ISO 898-1 钢螺栓疲劳参考公式不适用。"
+        warnings.append(note)
+        checks.append(SafetyCheck("SD", "疲劳安全系数", None, req.SD, "", ResultStatus.NEEDS_REVIEW, "R9", note))
+    elif sigma_a > 0 and sigma_as is not None:
         sd = v.add("SD", "疲劳安全系数", sigma_as / sigma_a, "", "R9/4")
         checks.append(SafetyCheck("SD", "疲劳安全系数", sd, req.SD, "", _status(sd, req.SD), "R9"))
     else:
@@ -608,6 +639,8 @@ def _engagement_check(
 ) -> SafetyCheck:
     bolt, nut, tapped = item.bolt, item.nut, item.tapped
     if item.is_through_bolt and nut.standard_adequate:
+        if engineering_data.uses_a2_bolt(bolt.property_class, item.provenance):
+            warnings.append("当前设置按匹配标准螺母免算 R11；请确认实际螺母材料及等级与 A2 螺栓匹配。")
         if engagement < nut.height - 1e-9:
             return SafetyCheck(
                 "mges", "螺纹旋合长度", engagement, nut.height, "mm", ResultStatus.FAIL, "R11",
@@ -617,6 +650,16 @@ def _engagement_check(
             "mges", "螺纹旋合长度", engagement, nut.height, "mm", ResultStatus.NOT_APPLICABLE, "R11",
             "标准螺母且等级匹配，按 VDI 免算脱扣",
         )
+    if engineering_data.uses_a2_bolt(bolt.property_class, item.provenance):
+        if bolt.tensile_strength_max is None:
+            note = "A2 螺纹脱扣校核需输入实际最大抗拉强度 Rm,max。"
+        elif item.is_through_bolt and (nut.tensile_strength is None or nut.shear_ratio is None):
+            note = "A2 非标准螺母脱扣校核需输入螺母实际抗拉强度和剪切强度比。"
+        else:
+            note = ""
+        if note:
+            warnings.append(note)
+            return SafetyCheck("mges", "螺纹旋合长度", engagement, None, "mm", ResultStatus.NEEDS_REVIEW, "R11", note)
     d, pitch, d2 = bolt.d, bolt.pitch, bolt.d2
     if item.is_through_bolt:
         rm_internal = nut.tensile_strength or bolt.tensile_strength

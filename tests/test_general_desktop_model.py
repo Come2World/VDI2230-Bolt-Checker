@@ -163,6 +163,65 @@ class GeneralFormModelTests(unittest.TestCase):
         self.assertEqual(self.model.values["bolt.yield_strength"], 940)
         self.assertEqual(self.model.source_for("bolt.yield_strength"), "class:10.9")
 
+    def test_a2_grade_transitions_clear_missing_shear_and_keep_manual_edits_on_length_change(self):
+        model = self.model
+        for grade, tensile, proof, shear in (
+            ("A2-70", 700, 450, 0.72),
+            ("A2-80", 800, 600, 0.68),
+            ("A2-90", 900, 700, None),
+        ):
+            with self.subTest(grade=grade):
+                self.assertIsNone(model.set_value("bolt.property_class", grade))
+                self.assertEqual(model.values["bolt.tensile_strength"], tensile)
+                self.assertEqual(model.values["bolt.yield_strength"], proof)
+                self.assertEqual(model.values["bolt.youngs_modulus"], 200000)
+                self.assertEqual(model.source_for("bolt.youngs_modulus"), "material:X5CrNi18-10")
+                self.assertEqual(model.values["bolt.shear_ratio"], shear)
+                self.assertEqual(model.source_for("bolt.shear_ratio"), None if shear is None else "table:shear_strength_ratio")
+
+        outcome = model.calculate()
+        self.assertFalse(outcome.ok)
+        self.assertIn("A2-90", next(error.message for error in outcome.field_errors if error.path == "bolt.shear_ratio"))
+        model.set_value("bolt.shear_ratio", 0.7)
+        model.set_value("bolt.youngs_modulus", 193000)
+        model.set_value("bolt.length", 65)
+        self.assertEqual(model.values["bolt.shear_ratio"], 0.7)
+        self.assertEqual(model.values["bolt.youngs_modulus"], 193000)
+        self.assertIsNone(model.source_for("bolt.shear_ratio"))
+        self.assertTrue(model.calculate().ok)
+        model.set_value("bolt.property_class", "8.8")
+        self.assertEqual(model.values["bolt.shear_ratio"], 0.65)
+        self.assertEqual(model.values["bolt.youngs_modulus"], 205000)
+
+    def test_product_specific_strength_inputs_are_cleared_on_reselection(self):
+        model = self.model
+        model.set_value("bolt.property_class", "A2-70")
+        model.set_value("bolt.tensile_strength_max", 850)
+        model.set_value("bolt.fatigue_strength_amplitude", 50)
+        model.set_value("bolt.length", 80)
+        self.assertEqual(model.values["bolt.tensile_strength_max"], 850)
+        self.assertEqual(model.values["bolt.fatigue_strength_amplitude"], 50)
+        message = model.set_value("bolt.property_class", "A2-80")
+        self.assertIn("已清除", message)
+        self.assertIsNone(model.values["bolt.tensile_strength_max"])
+        self.assertIsNone(model.values["bolt.fatigue_strength_amplitude"])
+        model.set_value("bolt.tensile_strength_max", 950)
+        model.set_value("bolt.fatigue_strength_amplitude", 45)
+        message = model.set_value("bolt.catalog_variant_id", "ISO4017-M12x1.75")
+        self.assertIn("已清除", message)
+        self.assertIsNone(model.values["bolt.tensile_strength_max"])
+        self.assertIsNone(model.values["bolt.fatigue_strength_amplitude"])
+
+    def test_removing_a2_class_keeps_product_restrictions_for_catalog_sourced_values(self):
+        model = self.model
+        model.set_value("bolt.property_class", "A2-90")
+        model.set_value("bolt.shear_ratio", 0.7)
+        model.set_value("bolt.property_class", None)
+        outcome = model.calculate()
+        self.assertTrue(outcome.ok, outcome.error)
+        self.assertEqual(outcome.result.check("SD").status.value, "需确认")
+        self.assertTrue(any("A2-90" in source for source in outcome.result.provisional_sources))
+
     def test_length_change_keeps_user_overrides(self):
         model = self.model
         model.set_value("bolt.head_bearing_diameter", 17.0)
@@ -176,6 +235,16 @@ class GeneralFormModelTests(unittest.TestCase):
         self.assertIn("目录中没有", message)
         with self.assertRaises(KeyError):
             self.model.set_value("bolt.unknown", 1)
+
+    def test_invalid_a2_catalog_selection_cannot_reuse_old_geometry(self):
+        model = self.model
+        model.set_value("bolt.property_class", "A2-70")
+        self.assertIn("目录中没有", model.set_value("bolt.catalog_variant_id", "ISO4014-M99x9"))
+        outcome = model.calculate()
+        self.assertFalse(outcome.ok)
+        self.assertIn("bolt.catalog_variant_id", {error.path for error in outcome.field_errors})
+        model.set_value("bolt.catalog_variant_id", "ISO4014-M12x1.75")
+        self.assertTrue(model.calculate().ok)
 
     def test_material_selection_fills_plate_properties(self):
         model = self.model

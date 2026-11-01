@@ -60,6 +60,9 @@ class VdiTableTests(unittest.TestCase):
     def test_table_7_and_presets(self):
         self.assertEqual(data.shear_strength_ratio("10.9"), 0.62)
         self.assertEqual(data.shear_strength_ratio("8.8"), 0.65)
+        self.assertEqual(data.shear_strength_ratio("A2-70"), 0.72)
+        self.assertEqual(data.shear_strength_ratio("A2-80"), 0.68)
+        self.assertIsNone(data.shear_strength_ratio("A2-90"))
         self.assertIsNone(data.shear_strength_ratio("unknown"))
         self.assertEqual(len(data.tightening_factor_presets()), 4)
         self.assertEqual(
@@ -98,9 +101,36 @@ class CatalogLookupTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             data.property_class_record("8.8", 36)
         summary = data.catalog_summary()
-        self.assertEqual(summary["property_classes"], ["8.8", "10.9", "12.9"])
+        self.assertEqual(summary["property_classes"], ["8.8", "10.9", "12.9", "A2-70", "A2-80", "A2-90"])
         self.assertEqual(len(summary["bolts"]), 24)
         self.assertEqual(len(summary["materials"]), 36)
+
+    def test_a2_catalog_values_and_sources_cover_catalog_sizes(self):
+        for variant in data.bolt_variants():
+            for grade, tensile, proof, ratio in (
+                ("A2-70", 700, 450, 0.72),
+                ("A2-80", 800, 600, 0.68),
+                ("A2-90", 900, 700, None),
+            ):
+                with self.subTest(variant=variant.variant_id, grade=grade):
+                    values = data.bolt_catalog_values(variant.variant_id, 70, grade)
+                    sources = data.catalog_value_sources(variant.variant_id, grade)
+                    self.assertEqual(values["bolt.tensile_strength"], tensile)
+                    self.assertEqual(values["bolt.yield_strength"], proof)
+                    self.assertEqual(values["bolt.shear_ratio"], ratio)
+                    self.assertEqual(values["bolt.youngs_modulus"], data.material("X5CrNi18-10").youngs_modulus)
+                    self.assertEqual(sources["bolt.youngs_modulus"], "material:X5CrNi18-10")
+                    self.assertEqual(sources["bolt.tensile_strength"], f"class:{grade}")
+                    if ratio is None:
+                        self.assertNotIn("bolt.shear_ratio", sources)
+                    else:
+                        self.assertEqual(sources["bolt.shear_ratio"], "table:shear_strength_ratio")
+                    self.assertFalse(data.source_is_provisional(f"class:{grade}"))
+        with self.assertRaises(KeyError):
+            data.property_class_record("A2-70", 31)
+        reference = data.property_class_record("A2-90", 30)
+        self.assertEqual(reference.source_ids, ("tomita_a2_90_supplier",))
+        self.assertIn("supplier", reference.applicability_note)
 
 
 if __name__ == "__main__":

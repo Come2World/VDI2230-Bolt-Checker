@@ -79,7 +79,7 @@ class BoltCatalogTests(unittest.TestCase):
         classes = self.catalog["property_class_records"]
         self.assertEqual(
             {row["property_class"] for row in classes},
-            {"8.8", "10.9", "12.9"},
+            {"8.8", "10.9", "12.9", "A2-70", "A2-80", "A2-90"},
         )
         for row in classes:
             self.assertTrue(row["calculation_eligible"])
@@ -112,6 +112,24 @@ class BoltCatalogTests(unittest.TestCase):
         self.assertEqual(len(at_16), 1)
         self.assertEqual(at_16[0]["tensile_strength_min_mpa"], 800)
 
+        for grade, strengths, source in (
+            ("A2-70", (700, 450), "andrews_iso3506_secondary"),
+            ("A2-80", (800, 600), "andrews_iso3506_secondary"),
+            ("A2-90", (900, 700), "tomita_a2_90_supplier"),
+        ):
+            with self.subTest(grade=grade):
+                record = next(row for row in classes if row["property_class"] == grade)
+                self.assertEqual(
+                    (record["tensile_strength_min_mpa"], record["yield_strength_min_mpa"]),
+                    strengths,
+                )
+                self.assertIn(source, record["source_ids"])
+                self.assertIsNone(record["proof_stress_mpa"])
+        supplier = next(row for row in self.catalog["sources"] if row["source_id"] == "tomita_a2_90_supplier")
+        self.assertEqual(supplier["listed_product_diameters_mm"], [6, 8, 10, 12, 16, 20])
+        a2_90 = next(row for row in classes if row["property_class"] == "A2-90")
+        self.assertIn("not establish", a2_90["applicability_note"])
+
         length_catalog = self.catalog["length_catalog"]
         lengths = length_catalog["candidate_nominal_lengths_mm"]
         self.assertEqual(lengths, sorted(set(lengths)))
@@ -126,6 +144,8 @@ class BoltCatalogTests(unittest.TestCase):
         }
         for variant in self.catalog["bolt_geometries"]:
             self.assertTrue(set(variant["source_ids"]) <= source_ids)
+        for record in self.catalog["property_class_records"]:
+            self.assertTrue(set(record["source_ids"]) <= source_ids)
         for joint in self.catalog["joint_dimension_records"]:
             self.assertTrue(set(joint["source_ids"]) <= source_ids)
 

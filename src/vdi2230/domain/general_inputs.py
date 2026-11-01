@@ -12,7 +12,8 @@ from typing import Any
 from vdi2230 import data as engineering_data
 
 
-SCHEMA_ID = "vdi2230.general/3"
+SCHEMA_ID = "vdi2230.general/4"
+LEGACY_SCHEMA_ID = "vdi2230.general/3"
 MAX_LAYERS = 10
 WASHER_SECTIONS = ("head_washer", "nut_washer")
 WASHER_ESTIMATE_SOURCE = "default:平垫片经验尺寸"
@@ -106,8 +107,11 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
     _f("bolt.youngs_modulus", "弹性模量 ES", "MPa", 205_000.0, "bolt", **POSITIVE),
     _f("bolt.yield_strength", "屈服强度 Rp0.2", "MPa", 640.0, "bolt", **POSITIVE),
     _f("bolt.tensile_strength", "抗拉强度 Rm", "MPa", 800.0, "bolt", **POSITIVE),
-    _f("bolt.tensile_strength_max", "最大抗拉强度 Rm,max", "MPa", None, "bolt", optional=True, help="留空 = 1.2·Rm", **POSITIVE),
+    _f("bolt.tensile_strength_max", "最大抗拉强度 Rm,max", "MPa", None, "bolt", optional=True,
+       help="非 A2 留空 = 1.2·Rm；A2 螺纹脱扣校核须输入实际值", **POSITIVE),
     _f("bolt.shear_ratio", "剪切强度比 τB/Rm", "", 0.65, "bolt", minimum=0.3, maximum=1.2),
+    _f("bolt.fatigue_strength_amplitude", "产品疲劳强度幅 σA", "MPa", None, "bolt", optional=True,
+       help="按实际螺栓、工况和寿命输入；用于 SD，不再套用默认疲劳公式", **POSITIVE),
     _f("bolt.rolling", "螺纹滚压", "", "SV", "bolt", kind="choice", choices=ROLLING),
     _f("bolt.thread_friction", "螺纹摩擦 μG", "", 0.12, "bolt", **FRICTION),
     _f("bolt.bearing_friction", "支承摩擦 μK", "", 0.12, "bolt", help="独立输入；拧紧侧螺栓头/螺母与垫片或板面的摩擦", **FRICTION),
@@ -116,7 +120,8 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
     _f("nut.width_across_flats", "螺母对边 s", "mm", 18.0, "bolt", **POSITIVE),
     _f("nut.youngs_modulus", "螺母弹性模量 EM", "MPa", 205_000.0, "bolt", **POSITIVE),
     _f("nut.standard_adequate", "标准螺母且等级匹配", "", True, "bolt", kind="bool", help="ISO 4032 且螺母等级 ≥ 螺栓等级时免 R11"),
-    _f("nut.tensile_strength", "螺母 Rm", "MPa", None, "bolt", optional=True, help="留空 = 螺栓 Rm", **POSITIVE),
+    _f("nut.tensile_strength", "螺母 Rm", "MPa", None, "bolt", optional=True,
+       help="非 A2 留空 = 螺栓 Rm；A2 非标准螺母须输入实际值", **POSITIVE),
     _f("nut.shear_ratio", "螺母 τB/Rm", "", None, "bolt", optional=True, minimum=0.3, maximum=1.2),
     _f("tapped.material_id", "内螺纹件材料", "", "Cq45", "bolt", kind="text", optional=True),
     _f("tapped.youngs_modulus", "内螺纹件 EM", "MPa", 205_000.0, "bolt", **POSITIVE),
@@ -209,6 +214,7 @@ class BoltInput:
     tensile_strength: float
     tensile_strength_max: float | None
     shear_ratio: float
+    fatigue_strength_amplitude: float | None
     rolling: str
     thread_friction: float
     bearing_friction: float
@@ -505,19 +511,30 @@ def parse_general_input(data: Any) -> GeneralInput:
     errors: list[FieldError] = []
     if not isinstance(data, dict):
         raise InputValidationError([FieldError("", "输入应为 JSON 对象")])
-    if data.get("schema", SCHEMA_ID) != SCHEMA_ID:
-        errors.append(FieldError("schema", f"仅支持 {SCHEMA_ID}；请分别确认螺栓的 thread_friction (μG) 和 bearing_friction (μK)"))
+    schema = data.get("schema", SCHEMA_ID)
+    if schema not in (SCHEMA_ID, LEGACY_SCHEMA_ID):
+        errors.append(FieldError("schema", f"仅支持 {SCHEMA_ID} 或 {LEGACY_SCHEMA_ID}；请分别确认螺栓的 thread_friction (μG) 和 bearing_friction (μK)"))
+    if (schema == LEGACY_SCHEMA_ID and isinstance(data.get("bolt"), dict)
+            and "fatigue_strength_amplitude" in data["bolt"]):
+        errors.append(FieldError("bolt.fatigue_strength_amplitude", "产品疲劳强度幅需要输入格式 vdi2230.general/4。"))
 
     values: dict[str, dict[str, Any]] = {name: {} for name in SECTION_TYPES}
     for spec in FIELD_SPECS:
         section, name = spec.path.split(".", 1)
         payload = _section_payload(data, section, errors)
         raw = payload.get(name, spec.default)
+        property_class = values["bolt"].get("property_class")
+        is_a2_90 = isinstance(property_class, str) and property_class.upper() == "A2-90"
+        if spec.path == "bolt.shear_ratio" and engineering_data.is_a2_bolt_class(property_class) and name not in payload:
+            raw = None
         if spec.diameter_factor is not None and name not in payload:
             diameter = values["bolt"].get("d")
             if isinstance(diameter, (int, float)) and diameter > 0:
                 raw = round(diameter * spec.diameter_factor, 6)
         values[section][name] = _parse_value(spec, raw, spec.path, errors)
+        if (spec.path == "bolt.shear_ratio" and is_a2_90
+                and errors and errors[-1].path == spec.path and errors[-1].message == "必填"):
+            errors[-1] = FieldError(spec.path, "A2-90 无默认剪切强度比，请按实际产品资料输入。")
 
     layers_raw = data.get("plates")
     layers: list[PlateLayer] = []
@@ -556,6 +573,18 @@ def parse_general_input(data: Any) -> GeneralInput:
                 break
             provenance[key] = value
 
+    property_class = values["bolt"].get("property_class")
+    if engineering_data.is_a2_bolt_class(property_class):
+        for path in sorted(engineering_data.STRENGTH_PATHS):
+            source = provenance.get(path, "")
+            if source.startswith("class:") and source != f"class:{property_class}":
+                errors.append(FieldError(path, "所选 A2 等级与强度来源不一致，请重新选择目录或手动填写。"))
+        ratio_path = engineering_data.SHEAR_RATIO_PATH
+        if provenance.get(ratio_path) == "table:shear_strength_ratio" and not any(error.path == ratio_path for error in errors):
+            ratio = engineering_data.shear_strength_ratio(property_class)
+            if ratio is None or values["bolt"]["shear_ratio"] != ratio:
+                errors.append(FieldError(ratio_path, "所选 A2 等级的剪切强度比与表 7 不符，请重新选择目录或手动填写。"))
+
     if errors:
         raise InputValidationError(errors)
 
@@ -578,6 +607,19 @@ def _validate_relations(item: GeneralInput) -> None:
         if not condition:
             errors.append(FieldError(path, message))
 
+    if engineering_data.uses_a2_bolt(bolt.property_class, item.provenance) and bolt.catalog_variant_id:
+        try:
+            engineering_data.bolt_variant(bolt.catalog_variant_id)
+        except KeyError:
+            valid_catalog = False
+        else:
+            valid_catalog = all(
+                not source.startswith("catalog:") or source == f"catalog:{bolt.catalog_variant_id}"
+                for path in engineering_data.CATALOG_GEOMETRY_PATHS
+                if (source := item.provenance.get(path, ""))
+            )
+        require(valid_catalog, "bolt.catalog_variant_id", "目录规格不存在或与保留的目录来源不一致，请重新选择或改为自定义。")
+
     require(bolt.d3 < bolt.d2 < bolt.d, "bolt.d2", "须满足 d3 < d2 < d")
     require(bolt.pitch < 0.25 * bolt.d, "bolt.pitch", "螺距相对直径过大")
     nominal_stress_area = math.pi / 4 * ((bolt.d2 + bolt.d3) / 2) ** 2
@@ -589,6 +631,17 @@ def _validate_relations(item: GeneralInput) -> None:
     require(bolt.yield_strength < bolt.tensile_strength, "bolt.yield_strength", "须小于 Rm")
     if bolt.tensile_strength_max is not None:
         require(bolt.tensile_strength_max >= bolt.tensile_strength, "bolt.tensile_strength_max", "须 ≥ Rm")
+    sourced_classes = {
+        source.removeprefix("class:")
+        for path in engineering_data.STRENGTH_PATHS
+        if (source := item.provenance.get(path, "")).startswith("class:")
+        and engineering_data.is_a2_bolt_class(source.removeprefix("class:"))
+    }
+    for property_class in sorted(sourced_classes):
+        try:
+            engineering_data.property_class_record(property_class, bolt.d)
+        except KeyError:
+            errors.append(FieldError("bolt.d", "目录 A2 强度不适用于该公称直径，请使用适用范围或手动输入强度。"))
     if bolt.shank_diameter is not None:
         require(bolt.shank_diameter <= bolt.d, "bolt.shank_diameter", "须 ≤ d")
         require(bolt.shank_diameter > bolt.bore_diameter, "bolt.shank_diameter", "须大于中心孔 db")

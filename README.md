@@ -100,9 +100,55 @@ other. μK describes the rotating head/nut bearing contact. Plate thickness,
 material, roughness Rz and interface friction μT belong to each ordered plate.
 
 The hex-bolt catalog covers ISO 4014/4017, M6–M30 coarse threads and
-8.8/10.9/12.9 property classes. Catalog values may be overridden; overrides
-survive bolt-length changes. Suggested lengths do not guarantee commercial
-availability for every standard/diameter combination.
+8.8/10.9/12.9 plus A2-70/A2-80/A2-90 property classes. Catalog values are
+editable; overrides survive bolt-length changes. Suggested lengths and
+geometry/class combinations do not guarantee commercial availability.
+
+| Class | Minimum Rm / Rp0.2 | τB/Rm | Reference |
+|---|---:|---:|---|
+| A2-70 | 700 / 450 MPa | 0.72 | ISO 3506-1:2020 secondary summary; VDI Table 7 |
+| A2-80 | 800 / 600 MPa | 0.68 | ISO 3506-1:2020 secondary summary; VDI Table 7 |
+| A2-90 | 900 / 700 MPa | **User input required** | Specific supplier's SUS304CUN product |
+
+A2-90 is a **supplier-specific, editable reference**, not a claim that ISO
+3506 specifies an A2-90 class or that every A2-90 bolt has these properties.
+The cited [supplier](https://tomitarashi.com/a2-90_a2-100_bolt.html) lists
+M6, M8, M10, M12, M16 and M20 products with JIS B1180 geometry. The app offers
+the reference across its M6–M30 catalog for convenience; other sizes,
+manufacturers and the catalog's ISO 4014/4017 geometry are **not verified
+supplier products**. Confirm the actual product, dimensions and strengths.
+The reference strengths remain marked **Review** when used. See the
+[catalog documentation](./src/vdi2230/data/bolt_catalog/README.md) for sources.
+
+A2 bolt elastic modulus defaults to **200000 MPa**, using the project's
+X5CrNi18-10 material as a representative, editable value; it is not a
+manufacturer guarantee. A2-90 has no bundled shear-strength ratio: enter one
+from the actual product data before calculation. The default 205000 MPa nut
+modulus is independent; enter the actual value for the selected nut.
+
+When the class or retained source identifies an A2 bolt, the ISO 898-1
+steel-bolt fatigue reference formula is not applied. For a completely manual
+material with no identifying class or source, supply the appropriate product
+fatigue data rather than relying on the steel-bolt default.
+For alternating axial load, enter the actual product's **fatigue strength
+amplitude σA** for the selected life, mean stress, geometry and reference
+section. It is the resistance before division by the required safety factor;
+the program uses it directly for `SD = σA / σa` without applying additional
+rolling or finite-life scaling. If absent, SD and the overall verdict require
+review instead of showing a fabricated fatigue factor. With no alternating
+load SD is not applicable. A manually entered amplitude also overrides the
+default estimate for other bolt classes and must be checked against the
+actual conditions.
+
+For A2 tapped joints or nonstandard nuts, an explicit actual bolt **Rm,max**
+is required to perform R11; the nonstandard-nut case also requires the nut's
+actual tensile strength and shear-strength ratio. Otherwise the R11 check
+requires review. The default **matching standard nut** checkbox waives
+stripping verification based on that assumption; it does not select or
+certify a nut. Check its actual material, class and dimensions. Changing the
+catalog variant, class, or nominal diameter clears any product-specific
+fatigue input and, when A2 is involved, maximum tensile strength; re-enter
+the applicable values. A length-only edit retains them.
 
 Optional head-side and nut-side **plain washers** are on the **Plates** tab.
 Both are off by default. ESV retains but does not use nut-side washer settings.
@@ -140,7 +186,7 @@ S355J0 is an initial selection, not a claim about any purchased washer.
 
 The **中文 / English** selector changes labels/options, section annotations,
 checks, warnings, field errors and the TXT report together. Numerical values,
-units, source identifiers and input schema `vdi2230.general/3` do not change.
+units, source identifiers and input schema do not change with the language.
 Translation is fully offline.
 
 Switching preserves entered text (including `0.10`), overrides, selected plate
@@ -151,9 +197,12 @@ even if they match a generated name. New plates use the current language.
 Invalid inputs remain invalid after switching; export stays disabled and the
 old section remains visibly stale.
 
-Programmatic inputs use separate `bolt.thread_friction` and
-`bolt.bearing_friction` fields. Schema versions 1/2 and
-`plates[].bearing_friction` are rejected rather than silently reinterpreted.
+Programmatic inputs use schema `vdi2230.general/4`, with separate
+`bolt.thread_friction` and `bolt.bearing_friction` fields and optional
+`bolt.fatigue_strength_amplitude`. Schema 3 inputs without the new fatigue
+field are accepted and re-emitted as schema 4; older software rejects schema 4
+instead of silently ignoring the new input. Schema versions 1/2 and
+`plates[].bearing_friction` remain rejected rather than silently reinterpreted.
 Application version, input schema and engineering-data versions are independent.
 
 ## Tests and development

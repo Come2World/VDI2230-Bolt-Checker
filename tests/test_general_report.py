@@ -5,6 +5,7 @@ from vdi2230.calculations.general import calculate_general
 from vdi2230.domain.general_inputs import default_input_json, parse_general_input
 from vdi2230.infrastructure.general_report import render_general_report
 from vdi2230.infrastructure.report import DISCLAIMER
+from vdi2230.ui.general_model import GeneralFormModel
 
 
 def report_for(payload) -> tuple[object, str]:
@@ -61,6 +62,25 @@ class GeneralReportTests(unittest.TestCase):
         _, text = report_for(b3_payload())
         self.assertIn("不适用", text)
         self.assertIn("无交变轴向载荷", text)
+
+    def test_a2_review_reasons_and_supplier_reference_are_bilingual(self) -> None:
+        model = GeneralFormModel()
+        model.set_value("bolt.property_class", "A2-90")
+        model.set_value("bolt.shear_ratio", 0.7)
+        model.set_value("load.transverse", 500)
+        zh = model.calculate("zh")
+        self.assertTrue(zh.ok, zh.error)
+        self.assertIn("厂商", zh.report)
+        self.assertIn("疲劳", zh.report)
+        self.assertIn("需确认", zh.report)
+        model.set_language("en")
+        en = model.calculate("en")
+        self.assertTrue(en.ok, en.error)
+        self.assertNotRegex(en.report, r"[\u4e00-\u9fff]")
+        self.assertIn("supplier", en.report.lower())
+        self.assertIn("fatigue", en.report.lower())
+        self.assertIn("Bolt input: (τB/Rm)·Rm", en.report)
+        self.assertEqual(zh.result.checks, en.result.checks)
 
 
 if __name__ == "__main__":

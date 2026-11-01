@@ -30,7 +30,7 @@ DEFAULT_TITLE = "通用螺栓连接"
 CATALOG_PATHS = ("bolt.catalog_variant_id", "bolt.property_class")
 BOLT_MATERIAL = frozenset({
     "bolt.youngs_modulus", "bolt.yield_strength", "bolt.tensile_strength", "bolt.tensile_strength_max",
-    "bolt.shear_ratio", "bolt.rolling", "bolt.thread_friction", "bolt.bearing_friction",
+    "bolt.shear_ratio", "bolt.fatigue_strength_amplitude", "bolt.rolling", "bolt.thread_friction", "bolt.bearing_friction",
 })
 MATERIAL_FIELDS = {
     "plates": ("youngs_modulus", "limiting_surface_pressure"),
@@ -269,13 +269,27 @@ class GeneralFormModel:
     # ----- edits -----
 
     def set_value(self, path: str, value: Any) -> str | None:
-        """Store a user edit; returns a message when a catalog lookup fails."""
+        """Store a user edit; report failed lookups or cleared product-specific inputs."""
         if path not in self.specs:
             raise KeyError(path)
+        previous = self.values.get(path)
+        old_class = previous if path == "bolt.property_class" else self.values.get("bolt.property_class")
+        new_class = value if path == "bolt.property_class" else old_class
+        was_a2 = engineering_data.uses_a2_bolt(old_class, self.prov)
+        cleared_product_input = False
         self.values[path] = value
         self.prov.pop(path, None)
+        if path in (*CATALOG_PATHS, "bolt.d") and previous != value:
+            cleared_product_input = self.values.get("bolt.fatigue_strength_amplitude") is not None
+            self.values["bolt.fatigue_strength_amplitude"] = None
+            self.prov.pop("bolt.fatigue_strength_amplitude", None)
+            if was_a2 or engineering_data.is_a2_bolt_class(new_class):
+                cleared_product_input |= self.values.get("bolt.tensile_strength_max") is not None
+                self.values["bolt.tensile_strength_max"] = None
+                self.prov.pop("bolt.tensile_strength_max", None)
+        message = "规格或等级改变，部分产品专用强度输入已清除，请核对后重新输入。" if cleared_product_input else None
         if path in CATALOG_PATHS:
-            return self.apply_catalog(force=True)
+            return self.apply_catalog(force=True) or message
         if path == "bolt.length" and self.values.get("bolt.catalog_variant_id"):
             return self.apply_catalog(force=False)
         section, name = path.split(".")
@@ -283,7 +297,7 @@ class GeneralFormModel:
             self._apply_material(value, section)
         if path == "bolt.d":
             self.refresh_washer_estimates()
-        return None
+        return message
 
     def refresh_washer_estimates(self) -> None:
         diameter = self.values.get("bolt.d")
@@ -320,6 +334,8 @@ class GeneralFormModel:
             self.values[path] = value
             if source:
                 self.prov[path] = source
+            else:
+                self.prov.pop(path, None)
         self.refresh_washer_estimates()
         return None
 

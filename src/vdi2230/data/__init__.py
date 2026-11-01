@@ -5,6 +5,7 @@ and audit notes remain available; model assumptions still require review.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import lru_cache
 from importlib.resources import files
@@ -19,6 +20,7 @@ PROVISIONAL_STATUSES = frozenset({
     "secondary_reference_only",
 })
 STEEL_YOUNGS_MODULUS_MPA = 205_000.0
+A2_MODULUS_MATERIAL_ID = "X5CrNi18-10"
 FULL_THREAD_STANDARDS = frozenset({"ISO 4017"})
 
 
@@ -92,6 +94,8 @@ class PropertyClassRecord:
     tensile_strength: float
     yield_strength: float
     verification_status: str
+    source_ids: tuple[str, ...]
+    applicability_note: str | None
 
     def applies_to(self, diameter: float) -> bool:
         above = (
@@ -182,6 +186,8 @@ def property_classes() -> tuple[PropertyClassRecord, ...]:
             tensile_strength=float(row["tensile_strength_min_mpa"]),
             yield_strength=float(row["yield_strength_min_mpa"]),
             verification_status=row["verification_status"],
+            source_ids=tuple(row["source_ids"]),
+            applicability_note=row.get("applicability_note"),
         )
         for row in _bolt_catalog()["property_class_records"]
     )
@@ -316,6 +322,10 @@ def friction_classes() -> tuple[dict[str, Any], ...]:
     return tuple(dict(row) for row in _tables()["friction_classes"]["rows"])
 
 
+def is_a2_bolt_class(property_class: object) -> bool:
+    return isinstance(property_class, str) and property_class.strip().upper().startswith("A2-")
+
+
 def bolt_catalog_values(
     variant_id: str,
     length: float,
@@ -336,7 +346,10 @@ def bolt_catalog_values(
         "bolt.head_height": variant.head_height,
         "bolt.thread_length": variant.thread_length_for(length),
         "bolt.shank_diameter": variant.nominal_diameter,
-        "bolt.youngs_modulus": STEEL_YOUNGS_MODULUS_MPA,
+        "bolt.youngs_modulus": (
+            material(A2_MODULUS_MATERIAL_ID).youngs_modulus
+            if is_a2_bolt_class(property_class) else STEEL_YOUNGS_MODULUS_MPA
+        ),
         "bolt.yield_strength": strength.yield_strength,
         "bolt.tensile_strength": strength.tensile_strength,
         "bolt.shear_ratio": ratio,
@@ -371,11 +384,24 @@ MATERIAL_FIELDS_BY_TARGET = {
 }
 
 
+def uses_a2_bolt(property_class: object, provenance: Mapping[str, str]) -> bool:
+    if is_a2_bolt_class(property_class):
+        return True
+    sources = (provenance.get(path, "") for path in STRENGTH_PATHS)
+    return any(
+        source.startswith("class:") and is_a2_bolt_class(source.removeprefix("class:"))
+        for source in sources
+    ) or provenance.get("bolt.youngs_modulus") == f"material:{A2_MODULUS_MATERIAL_ID}"
+
+
 def catalog_value_sources(variant_id: str, property_class: str) -> dict[str, str]:
     """Provenance tags for the values ``bolt_catalog_values`` fills in."""
     sources = {path: f"catalog:{variant_id}" for path in CATALOG_GEOMETRY_PATHS}
     sources.update({path: f"class:{property_class}" for path in STRENGTH_PATHS})
-    sources[SHEAR_RATIO_PATH] = "table:shear_strength_ratio"
+    if is_a2_bolt_class(property_class):
+        sources["bolt.youngs_modulus"] = f"material:{A2_MODULUS_MATERIAL_ID}"
+    if shear_strength_ratio(property_class) is not None:
+        sources[SHEAR_RATIO_PATH] = "table:shear_strength_ratio"
     return sources
 
 
@@ -397,6 +423,12 @@ def material_values(material_id: str) -> dict[str, float]:
 
 def catalog_summary() -> dict[str, Any]:
     """JSON-serializable lookup data for user interfaces."""
+    def class_sort_key(value: str) -> tuple[int, float, str]:
+        try:
+            return (0, float(value), "")
+        except ValueError:
+            return (1, 0.0, value)
+
     return {
         "catalog_version": _bolt_catalog()["catalog_version"],
         "status": _bolt_catalog()["catalog_status"],
@@ -411,7 +443,7 @@ def catalog_summary() -> dict[str, Any]:
             }
             for variant in bolt_variants()
         ],
-        "property_classes": sorted({row.property_class for row in property_classes()}, key=float),
+        "property_classes": sorted({row.property_class for row in property_classes()}, key=class_sort_key),
         "lengths": list(candidate_lengths()),
         "materials": [
             {

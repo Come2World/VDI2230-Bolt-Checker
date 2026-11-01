@@ -107,7 +107,10 @@ def render_general_report(
         value = _number(check.value) + unit if check.value is not None else "—"
         required = _number(check.required) + unit if check.required is not None else "—"
         left, right = ("（", "）") if language == "zh" else ("(", ")")
-        note = f"  {left}{t(check.note)}{right}" if check.note and check.status == ResultStatus.NOT_APPLICABLE else ""
+        note = (
+            f"  {left}{t(check.note)}{right}"
+            if check.note and check.status in (ResultStatus.NOT_APPLICABLE, ResultStatus.NEEDS_REVIEW) else ""
+        )
         lines.append(f"{check.symbol:<8}{t(check.label):<{label_width}}{value:>14}{required:>12}  {t(check.status.value)} · {t(check.reference)}{note}")
 
     lines += ["", t("二、输入参数"), THIN_RULE]

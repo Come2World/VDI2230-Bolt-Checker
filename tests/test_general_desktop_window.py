@@ -326,6 +326,45 @@ class GeneralWindowTests(unittest.TestCase):
         self.assertTrue(window.calculate_now().ok)
         self.assertIn("M16", window.report())
 
+    def test_a2_grade_errors_recovery_and_bilingual_fatigue_review(self):
+        window = self.window
+        self.set_choice("bolt.property_class", "A2-90")
+        self.assertEqual(window._vars["bolt.shear_ratio"].get(), "")
+        self.assertEqual(window._vars["bolt.youngs_modulus"].get(), "200000")
+        self.assertFalse(window.calculate_now().ok)
+        self.assertIn("A2-90", window.error_list.get(0))
+        self.assertTrue(window.export_button.instate(["disabled"]))
+        window.set_language("en")
+        self.assertFalse(window.calculate_now().ok)
+        self.assertIn("actual product", window.error_list.get(0))
+        window.set_language("zh")
+
+        window._vars["bolt.shear_ratio"].set("0.70")
+        outcome = window.calculate_now()
+        self.assertTrue(outcome.ok, outcome.error)
+        self.assertEqual(outcome.result.check("SD").status.value, "需确认")
+        self.assertIsNone(outcome.result.check("SD").value)
+        self.assertIn("疲劳", window.notes_var.get())
+        self.assertIn("厂商", window.report())
+
+        window.set_language("en")
+        self.assertNotRegex(window.report(), r"[\u4e00-\u9fff]")
+        self.assertIn("supplier", window.report().lower())
+        self.assertIn("fatigue", window.notes_var.get().lower())
+        window._vars["bolt.fatigue_strength_amplitude"].set("50")
+        self.assertTrue(window.calculate_now().ok)
+        self.assertIsNotNone(window.outcome.result.check("SD").value)
+        self.assertIn("50", window.report())
+
+        self.set_choice("bolt.property_class", "A2-80")
+        self.assertEqual(window._vars["bolt.shear_ratio"].get(), "0.68")
+        self.assertEqual(window._vars["bolt.fatigue_strength_amplitude"].get(), "")
+        self.assertTrue(window.calculate_now().ok)
+        self.assertEqual(window.outcome.result.check("SD").status.value, "需确认")
+        self.assertIn("cleared", window.notes_var.get())
+        window.set_language("zh")
+        self.assertIn("已清除", window.notes_var.get())
+
     def test_user_override_clears_catalog_marker(self):
         window = self.window
         window._vars["bolt.head_bearing_diameter"].set("17")

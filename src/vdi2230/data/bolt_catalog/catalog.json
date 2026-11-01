@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "catalog_version": "0.3.0",
+  "catalog_version": "0.4.0",
   "catalog_status": "accepted_baseline",
   "scope": {
     "fastener_type": "external_hexagon_head_bolt",
     "standards": ["ISO 4014", "ISO 4017"],
     "nominal_diameter_range_mm": [6, 30],
     "thread_series": "metric_coarse",
-    "property_classes": ["8.8", "10.9", "12.9"],
+    "property_classes": ["8.8", "10.9", "12.9", "A2-70", "A2-80", "A2-90"],
     "length_policy": "catalog_suggestions_and_custom"
   },
   "selection_policy": {
@@ -80,6 +80,22 @@
       "url": "https://vibromera.eu/calculators/bolt-strength-class-iso898/",
       "fields": ["property_class", "tensile_strength_min_mpa", "yield_strength_min_mpa", "proof_stress_mpa"],
       "verification_status": "secondary_reference_requires_primary_standard_check"
+    },
+    {
+      "source_id": "andrews_iso3506_secondary",
+      "title": "Andrews Fasteners: mechanical properties for austenitic stainless steel, based on ISO 3506-1:2020",
+      "url": "https://andrewsfasteners.uk/standards/mechanical-properties-for-austenitic-stainless-steel/",
+      "fields": ["property_class", "tensile_strength_min_mpa", "yield_strength_min_mpa"],
+      "verification_status": "secondary_reference_requires_primary_standard_check"
+    },
+    {
+      "source_id": "tomita_a2_90_supplier",
+      "title": "Tomita Rashi: SUS304CUN A2-90 hexagon bolt supplier reference",
+      "url": "https://tomitarashi.com/a2-90_a2-100_bolt.html",
+      "fields": ["property_class", "tensile_strength_min_mpa", "yield_strength_min_mpa"],
+      "listed_product_diameters_mm": [6, 8, 10, 12, 16, 20],
+      "note": "The supplier's listed product uses JIS B1180 geometry. Its strength data are not an ISO A2-90 grade or a guarantee for other manufacturers, dimensions or ISO 4014/4017 bolts.",
+      "verification_status": "supplier_product_reference_only"
     },
     {
       "source_id": "vdi2230_user_reference",
@@ -155,7 +171,10 @@
     {"property_class": "8.8", "diameter_min_mm": 6, "diameter_min_inclusive": true, "diameter_max_mm": 16, "diameter_max_inclusive": true, "tensile_strength_min_mpa": 800, "yield_strength_min_mpa": 640, "proof_stress_mpa": 580, "source_ids": ["vibromera_iso898_secondary"], "verification_status": "accepted_baseline", "calculation_eligible": true, "requires_review_warning": false},
     {"property_class": "8.8", "diameter_min_mm": 16, "diameter_min_inclusive": false, "diameter_max_mm": 30, "diameter_max_inclusive": true, "tensile_strength_min_mpa": 830, "yield_strength_min_mpa": 660, "proof_stress_mpa": 600, "source_ids": ["vibromera_iso898_secondary"], "verification_status": "accepted_baseline", "calculation_eligible": true, "requires_review_warning": false},
     {"property_class": "10.9", "diameter_min_mm": 6, "diameter_min_inclusive": true, "diameter_max_mm": 30, "diameter_max_inclusive": true, "tensile_strength_min_mpa": 1040, "yield_strength_min_mpa": 940, "proof_stress_mpa": 830, "source_ids": ["vibromera_iso898_secondary"], "verification_status": "accepted_baseline", "calculation_eligible": true, "requires_review_warning": false},
-    {"property_class": "12.9", "diameter_min_mm": 6, "diameter_min_inclusive": true, "diameter_max_mm": 30, "diameter_max_inclusive": true, "tensile_strength_min_mpa": 1220, "yield_strength_min_mpa": 1100, "proof_stress_mpa": 970, "source_ids": ["vibromera_iso898_secondary"], "verification_status": "accepted_baseline", "calculation_eligible": true, "requires_review_warning": false}
+    {"property_class": "12.9", "diameter_min_mm": 6, "diameter_min_inclusive": true, "diameter_max_mm": 30, "diameter_max_inclusive": true, "tensile_strength_min_mpa": 1220, "yield_strength_min_mpa": 1100, "proof_stress_mpa": 970, "source_ids": ["vibromera_iso898_secondary"], "verification_status": "accepted_baseline", "calculation_eligible": true, "requires_review_warning": false},
+    {"property_class": "A2-70", "diameter_min_mm": 6, "diameter_min_inclusive": true, "diameter_max_mm": 30, "diameter_max_inclusive": true, "tensile_strength_min_mpa": 700, "yield_strength_min_mpa": 450, "proof_stress_mpa": null, "source_ids": ["andrews_iso3506_secondary"], "verification_status": "accepted_baseline", "calculation_eligible": true, "requires_review_warning": false},
+    {"property_class": "A2-80", "diameter_min_mm": 6, "diameter_min_inclusive": true, "diameter_max_mm": 30, "diameter_max_inclusive": true, "tensile_strength_min_mpa": 800, "yield_strength_min_mpa": 600, "proof_stress_mpa": null, "source_ids": ["andrews_iso3506_secondary"], "verification_status": "accepted_baseline", "calculation_eligible": true, "requires_review_warning": false},
+    {"property_class": "A2-90", "diameter_min_mm": 6, "diameter_min_inclusive": true, "diameter_max_mm": 30, "diameter_max_inclusive": true, "tensile_strength_min_mpa": 900, "yield_strength_min_mpa": 700, "proof_stress_mpa": null, "source_ids": ["tomita_a2_90_supplier"], "applicability_note": "User-editable supplier reference offered for the catalog diameter range; this does not establish supplier availability or strength guarantees for each diameter or ISO geometry.", "verification_status": "accepted_baseline", "calculation_eligible": true, "requires_review_warning": false}
   ],
   "length_catalog": {
     "source_id": "arafat_length_candidates",

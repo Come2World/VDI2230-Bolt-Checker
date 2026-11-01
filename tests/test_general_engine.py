@@ -9,6 +9,7 @@ from __future__ import annotations
 import copy
 import unittest
 
+from vdi2230 import data as engineering_data
 from vdi2230.calculations.b1 import calculate_b1
 from vdi2230.calculations.b2 import calculate_b2
 from vdi2230.calculations.b3 import calculate_b3
@@ -17,7 +18,7 @@ from vdi2230.calculations.general import (
     calculate_general,
     iso965_tolerances,
 )
-from vdi2230.domain.general_inputs import default_input_json, default_layer, parse_general_input
+from vdi2230.domain.general_inputs import InputValidationError, default_input_json, default_layer, parse_general_input
 from vdi2230.domain.models import ResultStatus
 
 
@@ -90,6 +91,21 @@ def b3_payload() -> dict:
     payload["load"].update(axial_max=0.0, torque=110.0, friction_radius=19.5)
     payload["assembly"].update(tightening_factor=1.6)
     payload["embedding"].update(mode="table", interface_count=2)
+    return payload
+
+
+def a2_payload(grade: str) -> dict:
+    payload = default_input_json()
+    variant = payload["bolt"]["catalog_variant_id"]
+    values = engineering_data.bolt_catalog_values(variant, payload["bolt"]["length"], grade)
+    for path, value in values.items():
+        section, name = path.split(".")
+        payload[section][name] = value
+    payload["bolt"]["property_class"] = grade
+    payload["provenance"].update(engineering_data.catalog_value_sources(variant, grade))
+    if grade == "A2-90":
+        payload["bolt"]["shear_ratio"] = 0.7
+        payload["provenance"].pop("bolt.shear_ratio", None)
     return payload
 
 
@@ -322,6 +338,113 @@ class GeneralEngineBehaviourTests(unittest.TestCase):
         self.assertAlmostEqual(tolerances["d2_min"], 25.493, delta=0.003)
         self.assertAlmostEqual(tolerances["D1_max"], 25.21, delta=0.003)
         self.assertAlmostEqual(tolerances["d_min"], 26.682, delta=0.003)
+
+
+class AusteniticBoltTests(unittest.TestCase):
+    def test_a2_fatigue_requires_product_data_without_iso898_estimates(self) -> None:
+        for grade in ("A2-70", "A2-80", "A2-90"):
+            with self.subTest(grade=grade):
+                result = run(a2_payload(grade))
+                self.assertEqual(result.check("SD").status, ResultStatus.NEEDS_REVIEW)
+                self.assertIsNone(result.check("SD").value)
+                self.assertNotEqual(result.verdict, ResultStatus.PASS)
+                self.assertTrue(any("疲劳" in warning for warning in result.warnings))
+                with self.assertRaises(KeyError):
+                    result.value("σASV")
+                with self.assertRaises(KeyError):
+                    result.value("SD")
+
+    def test_product_fatigue_amplitude_is_used_directly_for_the_specified_life(self) -> None:
+        payload = a2_payload("A2-80")
+        payload["bolt"]["fatigue_strength_amplitude"] = 50
+        payload["load"]["cycles"] = 100_000
+        for rolling in ("SV", "SG"):
+            with self.subTest(rolling=rolling):
+                payload["bolt"]["rolling"] = rolling
+                result = run(payload)
+                self.assertAlmostEqual(result.check("SD").value, 50 / result.value("σa"))
+                self.assertEqual(result.value("σA,input"), 50)
+                with self.assertRaises(KeyError):
+                    result.value("σASV")
+        payload["bolt"]["fatigue_strength_amplitude"] = 0.01
+        failed = run(payload)
+        self.assertEqual(failed.check("SD").status, ResultStatus.FAIL)
+        self.assertEqual(failed.verdict, ResultStatus.FAIL)
+
+    def test_product_fatigue_check_uses_the_required_threshold(self) -> None:
+        payload = a2_payload("A2-70")
+        stress = run(payload).value("σa")
+        required = payload["requirements"]["SD"]
+        for multiplier, status in ((0.999, ResultStatus.FAIL), (1.0, ResultStatus.PASS), (1.001, ResultStatus.PASS)):
+            with self.subTest(multiplier=multiplier):
+                payload["bolt"]["fatigue_strength_amplitude"] = stress * required * multiplier
+                self.assertEqual(run(payload).check("SD").status, status)
+
+    def test_no_alternating_load_needs_no_fatigue_data(self) -> None:
+        payload = a2_payload("A2-70")
+        payload["load"]["axial_min"] = payload["load"]["axial_max"]
+        result = run(payload)
+        self.assertEqual(result.check("SD").status, ResultStatus.NOT_APPLICABLE)
+        self.assertFalse(any("疲劳强度" in warning for warning in result.warnings))
+        with self.assertRaises(KeyError):
+            result.value("σASV")
+
+    def test_a2_r11_requires_maximum_tensile_strength(self) -> None:
+        for joint_type in ("ESV", "DSV"):
+            with self.subTest(joint_type=joint_type):
+                payload = a2_payload("A2-70")
+                payload["joint"]["type"] = joint_type
+                payload["nut"]["standard_adequate"] = False
+                result = run(payload)
+                self.assertEqual(result.check("mges").status, ResultStatus.NEEDS_REVIEW)
+                self.assertIsNone(result.check("mges").required)
+                self.assertTrue(any("Rm,max" in warning for warning in result.warnings))
+                with self.assertRaises(KeyError):
+                    result.value("mges,min")
+                payload["bolt"]["tensile_strength_max"] = 850
+                if joint_type == "DSV":
+                    missing_nut = run(payload)
+                    self.assertEqual(missing_nut.check("mges").status, ResultStatus.NEEDS_REVIEW)
+                    payload["nut"].update(tensile_strength=900, shear_ratio=0.7)
+                result = run(payload)
+                self.assertIn(result.check("mges").status, {ResultStatus.PASS, ResultStatus.FAIL})
+                self.assertGreater(result.value("mges,min"), 0)
+
+    def test_a2_90_supplier_reference_requires_product_applicability_review(self) -> None:
+        payload = a2_payload("A2-90")
+        payload["load"].update(axial_min=0, axial_max=0)
+        result = run(payload)
+        self.assertEqual(result.verdict, ResultStatus.NEEDS_REVIEW)
+        self.assertTrue(any("A2-90" in source for source in result.provisional_sources))
+        self.assertTrue(any("厂商" in warning for warning in result.warnings))
+
+    def test_a2_catalog_strengths_are_rejected_outside_catalog_diameters(self) -> None:
+        payload = a2_payload("A2-70")
+        payload["bolt"]["d"] = 31
+        with self.assertRaises(InputValidationError) as raised:
+            parse_general_input(payload)
+        self.assertTrue(any(error.path == "bolt.d" and "目录 A2" in error.message for error in raised.exception.errors))
+
+    def test_standard_nut_setting_requires_product_confirmation(self) -> None:
+        result = run(a2_payload("A2-70"))
+        self.assertEqual(result.check("mges").status, ResultStatus.NOT_APPLICABLE)
+        self.assertTrue(any("螺母" in warning for warning in result.warnings))
+
+    def test_user_supplied_shear_ratio_is_not_attributed_to_table_7(self) -> None:
+        payload = a2_payload("A2-90")
+        payload["load"]["transverse"] = 500
+        result = run(payload)
+        shear = next(value for value in result.result.values if value.symbol == "τB")
+        self.assertIn("螺栓输入", shear.formula_reference)
+        self.assertNotIn("表 7", shear.formula_reference)
+
+    def test_failure_overrides_supplier_reference_review(self) -> None:
+        payload = a2_payload("A2-90")
+        payload["bolt"]["fatigue_strength_amplitude"] = 0.01
+        result = run(payload)
+        self.assertTrue(result.provisional_sources)
+        self.assertEqual(result.check("SD").status, ResultStatus.FAIL)
+        self.assertEqual(result.verdict, ResultStatus.FAIL)
 
 
 if __name__ == "__main__":
