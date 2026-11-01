@@ -40,7 +40,7 @@ class BoltCatalogTests(unittest.TestCase):
 
     def test_bolt_variants_have_uniform_shape_and_valid_thread_fields(self):
         variants = self.catalog["bolt_geometries"]
-        self.assertEqual(len(variants), 24)
+        self.assertEqual(len(variants), 33)
         self.assertEqual(
             len({row["variant_id"] for row in variants}),
             len(variants),
@@ -48,15 +48,25 @@ class BoltCatalogTests(unittest.TestCase):
         thread_size_ids = {
             row["size_id"] for row in self.catalog["thread_sizes"]
         }
-        expected_keys = set(variants[0])
+        keys_by_head = {}
 
         for row in variants:
-            self.assertEqual(set(row), expected_keys)
+            # Rows of one head type share a schema; hex and socket differ.
+            self.assertEqual(set(row), keys_by_head.setdefault(row["head_type"], set(row)))
             self.assertIn(row["thread_size_id"], thread_size_ids)
-            self.assertIn(row["standard"], {"ISO 4014", "ISO 4017"})
-            self.assertGreater(row["head_height_k_mm"], 0)
-            self.assertGreater(row["width_across_flats_s_mm"], 0)
             self.assertEqual(row["verification_status"], "accepted_baseline")
+            self.assertGreater(row["head_height_k_mm"], 0)
+            if row["standard"] == "ISO 4762":
+                self.assertEqual(row["head_type"], "socket")
+                self.assertEqual(row["threading"], "partial")
+                self.assertGreater(row["head_diameter_dk_mm"], row["head_bearing_diameter_dw_mm"])
+                self.assertLess(row["socket_size_s_mm"], row["head_diameter_dk_mm"])
+                self.assertLess(row["socket_depth_t_mm"], row["head_height_k_mm"])
+                self.assertGreater(row["full_thread_max_length_mm"], row["thread_length_b_mm"])
+                continue
+            self.assertEqual(row["head_type"], "hex")
+            self.assertIn(row["standard"], {"ISO 4014", "ISO 4017"})
+            self.assertGreater(row["width_across_flats_s_mm"], 0)
             if row["standard"] == "ISO 4014":
                 self.assertEqual(row["threading"], "partial")
                 self.assertIsNone(row["unthreaded_shank_length_h_mm"])
@@ -67,6 +77,30 @@ class BoltCatalogTests(unittest.TestCase):
                 self.assertIsNone(row["thread_length_b1_mm"])
                 self.assertIsNone(row["thread_length_b2_mm"])
                 self.assertGreater(row["unthreaded_shank_length_h_mm"], 0)
+
+    def test_iso4762_socket_head_rows_cover_the_standard_sizes(self):
+        sockets = {
+            row["thread_size_id"]: row for row in self.catalog["bolt_geometries"] if row["standard"] == "ISO 4762"
+        }
+        self.assertEqual(
+            sorted(int(size[1:].split("x")[0]) for size in sockets),
+            [6, 8, 10, 12, 14, 16, 20, 24, 30],
+        )
+        m12 = sockets["M12x1.75"]
+        self.assertEqual(
+            (m12["head_diameter_dk_mm"], m12["head_height_k_mm"], m12["socket_size_s_mm"],
+             m12["socket_depth_t_mm"], m12["head_bearing_diameter_dw_mm"], m12["thread_length_b_mm"]),
+            (18.0, 12.0, 10.0, 6.0, 17.23, 36.0),
+        )
+        self.assertIn("ISO 4762", self.catalog["scope"]["standards"])
+        self.assertIn("iso4762_secondary", {source["source_id"] for source in self.catalog["sources"]})
+        for row in sockets.values():
+            # ISO 4762 reference b = 2d + 12 for every size in range.
+            self.assertEqual(row["thread_length_b_mm"], 2 * int(row["thread_size_id"][1:].split("x")[0]) + 12)
+
+    def test_joint_records_carry_iso4032_nut_width_across_flats(self):
+        for row in self.catalog["joint_dimension_records"]:
+            self.assertGreater(row["nut_iso4032_width_across_flats_s_mm"], row["nut_iso4032_bearing_diameter_dw_min_mm"])
 
     def test_bundled_values_are_accepted_without_forcing_review(self):
         policy = self.catalog["selection_policy"]

@@ -2,11 +2,11 @@
 
 | 项目 | 内容 |
 |---|---|
-| 文档版本 | 0.12 |
+| 文档版本 | 0.13 |
 | 日期 | 2026-11-01 |
 | 应用版本 | 0.0.1 |
 | 发布分支 | `VDI2230_BOLT_CHECKER_RELEASE_0.0.1` |
-| 对应需求 | [需求规格说明书](./SOFTWARE_REQUIREMENTS_SPECIFICATION.md) v1.6 |
+| 对应需求 | [需求规格说明书](./SOFTWARE_REQUIREMENTS_SPECIFICATION.md) v1.7 |
 | 当前交付 | 通用 Tk 桌面计算器；内部保留标准算例回归 |
 
 ## 1. 发布范围与裁剪原则
@@ -93,6 +93,14 @@ tests/test_reference_cases.py → 内部固定标准算例计算器
 保持来源、版本、原始差异及许可证，不改变工程值或宣称独立认证。
 字段来源使用目录、强度等级、材料、表格或用户标识；手动修改清除原自动来源。
 长度变化只更新仍属于目录的值，用户覆盖不被重置。
+
+目录版本 0.5.0 增加 ISO 4762 内六角圆柱头螺钉（9 个规格）：`bolt_geometries` 行带 `head_type`，
+内六角行自带 `head_bearing_diameter_dw_mm`，优先于按螺纹规格共享的外六角 dw；螺纹长度在
+`full_thread_max_length_mm` 以内为全螺纹，否则取单一参考 b。`joint_dimension_records` 增加 ISO 4032
+螺母对边，螺母对边不再借用螺栓头对边。`bolt.head_type` 及绘图用头部尺寸
+（`head_width_across_flats`、`head_diameter`、`socket_size`、`socket_depth`）属于目录路径；
+旧文件缺这些可选字段时取空，由剖面按 dW 估算，输入 schema 保持 `vdi2230.general/4`。
+剖面 `general_section.py` 绘制 dW 支承面、dW 尺寸线（可点击跳转 dW 字段）和承压环面。
 
 目录版本 0.4.0 增加 A2-70/80/90；A2 模量从 `material:X5CrNi18-10`
 取 200000 MPa。A2-70/80 的剪切比来自表 7，A2-90 切换时清除旧剪切比和来源，

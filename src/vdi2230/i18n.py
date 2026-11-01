@@ -125,8 +125,15 @@ MESSAGES = {
     "最大抗拉强度 Rm,max": "Max. strength Rm,max",
     "剪切强度比 τB/Rm": "Shear strength ratio τB/Rm",
     "产品疲劳强度幅 σA": "Product fatigue strength amplitude σA",
-    "按实际螺栓、工况和寿命输入；用于 SD，不再套用默认疲劳公式":
-        "Enter the actual bolt fatigue strength amplitude for the conditions and life; used directly for SD.",
+    "留空 = 8.8/10.9/12.9 按 VDI R9 计算 σASV/σASG（见报告 R9）；A2 有交变载荷时须输入产品值":
+        "Blank = calculated by VDI R9 as σASV/σASG for 8.8/10.9/12.9 (see report R9); A2 with alternating load requires the product value.",
+    "头部对边 s": "Head width across flats s",
+    "头部直径 dk": "Head diameter dk",
+    "内六角对边 s": "Socket size s",
+    "内六角深度 t": "Socket depth t",
+    "仅用于剖面图；留空或与 dW 不协调时按 dW 估算": "Drawing only; blank or inconsistent with dW = estimated from dW",
+    "dW 用于：R10 面压 Ap = π/4·(dW²−dha²)、变形锥起始直径及 βL = lP/dW、y = DA′/dW、R13 支承摩擦直径 DKm = (dW+dha)/2；头部对边 s、dk 和内六角尺寸仅用于剖面图。":
+        "dW is used for: R10 bearing area Ap = π/4·(dW²−dha²), the deformation-cone start diameter with βL = lP/dW and y = DA′/dW, and the R13 bearing friction diameter DKm = (dW+dha)/2; head s, dk and socket sizes are for the drawing only.",
     "非 A2 留空 = 1.2·Rm；A2 螺纹脱扣校核须输入实际值":
         "For non-A2 bolts, blank = 1.2·Rm; A2 thread-stripping checks require the actual value.",
     "非 A2 留空 = 螺栓 Rm；A2 非标准螺母须输入实际值":

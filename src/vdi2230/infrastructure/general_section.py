@@ -33,6 +33,7 @@ TAPPED_FILL = "#172749"
 CONE_FILL = "#be85ff"
 INTERFACE_STROKE = "#dc8aff"
 DIMENSION_STROKE = "#83def5"
+BEARING_STROKE = "#ffd166"
 TEXT_FILL = "#d6efff"
 MUTED_TEXT = "#89abc5"
 
@@ -62,6 +63,8 @@ def section_target(role: str) -> str:
         return "bolt.head_height" if role in {"bolt-head", "label-head"} else "bolt.length"
     return {
         "nut": "nut.height", "label-nut": "nut.height", "tapped": "tapped.material_id",
+        "bearing-head": "bolt.head_bearing_diameter", "dim-dW": "bolt.head_bearing_diameter",
+        "bearing-nut": "nut.bearing_diameter",
         "washer-head": "head_washer.thickness", "washer-nut": "nut_washer.thickness",
     }.get(role, "")
 
@@ -105,6 +108,52 @@ def _hex_profile(cx: float, top: float, bottom: float, width: float, role: str, 
     return shapes
 
 
+def _socket_head(cx: float, top: float, bottom: float, collar: float, dk: float, dw: float,
+                 socket: float, depth: float, role: str) -> list[Shape]:
+    """Cylindrical socket head: top edge chamfer, underside run-out to dW and a hexagon socket with drill point."""
+    chamfer = min(0.06 * dk, 0.2 * (bottom - top))
+    outline = (cx - dw / 2, bottom, cx - dk / 2, bottom - collar, cx - dk / 2, top + chamfer, cx - dk / 2 + chamfer, top,
+               cx + dk / 2 - chamfer, top, cx + dk / 2, top + chamfer, cx + dk / 2, bottom - collar, cx + dw / 2, bottom)
+    shapes = [Shape("polygon", outline, fill=BOLT_FILL, stroke=BOLT_STROKE, role=role, stroke_width=1.6)]
+    depth = min(depth, 0.8 * (bottom - top))
+    point = min(0.3 * socket, 0.9 * (bottom - top) - depth)
+    recess = (cx - socket / 2, top, cx - socket / 2, top + depth, cx, top + depth + max(point, 0.0),
+              cx + socket / 2, top + depth, cx + socket / 2, top)
+    shapes.append(Shape("polygon", recess, fill=DRAWING_BACKGROUND, stroke=BOLT_STROKE, role=role, stroke_width=1.2))
+    for x in (cx - socket / 4, cx + socket / 4):
+        shapes.append(Shape("line", (x, top, x, top + depth), stroke=BOLT_STROKE, role=role, stroke_width=0.7))
+    return shapes
+
+
+def _bearing_ring(cx: float, level: float, inner: float, outer: float, role: str) -> list[Shape]:
+    """Highlight the effective bearing annulus (dha … dW) on both sides of the axis."""
+    return [
+        Shape("line", (cx + sign * inner / 2, level, cx + sign * outer / 2, level),
+              stroke=BEARING_STROKE, role=role, stroke_width=2.6)
+        for sign in (-1, 1)
+    ]
+
+
+def head_drawing_sizes(bolt) -> dict[str, float]:
+    """Head outline sizes in mm; catalog values when present, otherwise proportional estimates from dW."""
+    dw = bolt.head_bearing_diameter
+    # Stale values (e.g. after a manual dW change) must never draw a head smaller than its bearing face.
+    if bolt.head_type == "hex":
+        flats = bolt.head_width_across_flats
+        flats = flats if flats and flats >= dw else dw / 0.92
+        return {"width": flats * 2 / 3 ** 0.5, "flats": flats}
+    dk = bolt.head_diameter
+    dk = dk if dk and dk >= dw else dw * 1.05
+    socket = bolt.socket_size
+    depth = bolt.socket_depth
+    return {
+        "width": dk,
+        "dk": dk,
+        "socket": socket if socket and socket < 0.8 * dk else 0.42 * dk,
+        "depth": depth if depth and depth < bolt.head_height else 0.5 * bolt.head_height,
+    }
+
+
 def _fmt(value: float) -> str:
     return f"{value:.4g}"
 
@@ -123,8 +172,10 @@ def general_section_shapes(
     bolt, joint, nut = item.bolt, item.joint, item.nut
     dsv = item.is_through_bolt
     clamp = metrics.clamp_length
-    head_width = bolt.head_bearing_diameter * (1.1 if bolt.head_type == "hex" else 1.05)
-    nut_width = max(nut.width_across_flats, nut.bearing_diameter * 1.05)
+    head_sizes = head_drawing_sizes(bolt)
+    head_width = head_sizes["width"]
+    # Front elevation of a hexagon shows the width across corners e = 2s/√3.
+    nut_width = max(nut.width_across_flats, nut.bearing_diameter) * 2 / 3 ** 0.5
     shank_total = 0.0 if bolt.thread_length is None else bolt.length - bolt.thread_length
     if dsv:
         below = max(bolt.length, clamp + nut.height)
@@ -137,7 +188,7 @@ def general_section_shapes(
     pad = 12.0
     left_band = min(64.0, width * 0.15)
     label_band = min(max(width * 0.32, 95.0), 230.0)
-    top_band, bottom_band = 50.0, 40.0
+    top_band, bottom_band = 64.0, 40.0
     gx0, gx1 = pad + left_band, width - pad - label_band
     gy0, gy1 = pad + top_band, height - pad - bottom_band
     scale = min((gx1 - gx0) / across_mm, (gy1 - gy0) / total_mm)
@@ -215,17 +266,20 @@ def general_section_shapes(
         shapes.append(Shape("polygon", polygon, fill=CONE_FILL, stroke=CONE_FILL, dash=True, role="cone", opacity=0.06))
     shapes.extend(hatching)
 
+    # Bearing face (washer face / underside run-out) of diameter dW; drawn thickness is visual only.
+    collar = min(max(0.08 * bolt.head_height * scale, 2.0), 0.3 * bolt.head_height * scale)
     if bolt.head_type == "hex":
-        shapes.extend(_hex_profile(cx, y_top, y(0.0), head_width * scale, "bolt-head"))
+        shapes.extend(_hex_profile(cx, y_top, y(0.0) - collar, head_width * scale, "bolt-head"))
+        shapes.append(Shape(
+            "rect", (cx - half(bolt.head_bearing_diameter), y(0.0) - collar, cx + half(bolt.head_bearing_diameter), y(0.0)),
+            fill=BOLT_FILL, stroke=BOLT_STROKE, role="bolt-head", stroke_width=1.4,
+        ))
     else:
-        shapes.append(Shape(
-            "rect", (cx - half(head_width), y_top, cx + half(head_width), y(0.0)),
-            fill=BOLT_FILL, stroke=BOLT_STROKE, role="bolt-head", stroke_width=1.6,
+        shapes.extend(_socket_head(
+            cx, y_top, y(0.0), collar, head_sizes["dk"] * scale, bolt.head_bearing_diameter * scale,
+            head_sizes["socket"] * scale, head_sizes["depth"] * scale, "bolt-head",
         ))
-        shapes.append(Shape(
-            "rect", (cx - half(0.8 * bolt.d), y_top, cx + half(0.8 * bolt.d), y_top + 0.5 * bolt.head_height * scale),
-            fill=DRAWING_BACKGROUND, stroke=BOLT_STROKE, role="bolt-head",
-        ))
+    shapes.extend(_bearing_ring(cx, y(0.0), item.bearing_inner("head") * scale, item.bearing_outer("head") * scale, "bearing-head"))
 
     shank_end = min(max(shank_total, 0.0), bolt.length)
     shank_diameter = bolt.shank_diameter or bolt.d
@@ -256,7 +310,13 @@ def general_section_shapes(
         ))
 
     if dsv:
-        shapes.extend(_hex_profile(cx, y(clamp), y(clamp + nut.height), nut_width * scale, "nut", flipped=True))
+        nut_collar = min(max(0.08 * nut.height * scale, 2.0), 0.3 * nut.height * scale)
+        shapes.extend(_hex_profile(cx, y(clamp) + nut_collar, y(clamp + nut.height), nut_width * scale, "nut", flipped=True))
+        shapes.append(Shape(
+            "rect", (cx - half(nut.bearing_diameter), y(clamp), cx + half(nut.bearing_diameter), y(clamp) + nut_collar),
+            fill=BOLT_FILL, stroke=BOLT_STROKE, role="nut", stroke_width=1.4,
+        ))
+        shapes.extend(_bearing_ring(cx, y(clamp), item.bearing_inner("nut") * scale, item.bearing_outer("nut") * scale, "bearing-nut"))
 
     shapes.append(Shape("line", (cx, y_top - 6, cx, y_end + 6), stroke=MUTED_TEXT,
                         role="axis", dash_pattern=(12, 4, 2, 4), stroke_width=0.8))
@@ -309,7 +369,12 @@ def _dimensions(item, metrics, cx, y, half, gx0, gy1) -> list[Shape]:
                                  f"t{index + 1} {_fmt(layer.thickness)}", f"dim-t{index + 1}", True)
         depth += layer.thickness
     head_top = y(-item.bolt.head_height)
-    shapes += _dimension(cx - half(item.bolt.d), head_top - 16, cx + half(item.bolt.d), head_top - 16,
+    dw = item.bolt.head_bearing_diameter
+    shapes += _dimension(cx - half(dw), head_top - 16, cx + half(dw), head_top - 16, f"dW {_fmt(dw)}", "dim-dW", False)
+    for sign in (-1, 1):
+        shapes.append(Shape("line", (cx + sign * half(dw), head_top - 20, cx + sign * half(dw), y(0.0)),
+                            stroke=DIMENSION_STROKE, role="dim-dW", stroke_width=0.6, dash_pattern=(2, 3)))
+    shapes += _dimension(cx - half(item.bolt.d), head_top - 34, cx + half(item.bolt.d), head_top - 34,
                          f"d {_fmt(item.bolt.d)}", "dim-d", False)
     outer = item.joint.outer_diameter
     shapes += _dimension(cx - half(outer), gy1 + 20, cx + half(outer), gy1 + 20, f"DA {_fmt(outer)}", "dim-DA", False)
@@ -372,7 +437,7 @@ def _labels(item, metrics, cx, y, half, head_width, nut_width, label_x, top_limi
     if dsv:
         entries.append((
             y(clamp + nut.height / 2), cx + half(nut_width),
-            f"{t('螺母')} m {_fmt(nut.height)}", head_mu, t("螺母"), "label-nut",
+            f"{t('螺母')} m {_fmt(nut.height)}", f"dW {_fmt(nut.bearing_diameter)} · {head_mu}", t("螺母"), "label-nut",
         ))
     else:
         material = tapped.material_id or t("自定义")

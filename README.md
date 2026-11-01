@@ -99,9 +99,22 @@ Thread friction **μG** and bearing friction **μK** belong to the bolt and are
 other. μK describes the rotating head/nut bearing contact. Plate thickness,
 material, roughness Rz and interface friction μT belong to each ordered plate.
 
-The hex-bolt catalog covers ISO 4014/4017, M6–M30 coarse threads and
-8.8/10.9/12.9 plus A2-70/A2-80/A2-90 property classes. Catalog values are
-editable; overrides survive bolt-length changes. Suggested lengths and
+The bolt catalog covers ISO 4014/4017 hexagon head bolts and ISO 4762
+hexagon socket head cap screws (M6–M16, M20, M24, M30), M6–M30 coarse
+threads and 8.8/10.9/12.9 plus A2-70/A2-80/A2-90 property classes. Head
+geometry is independent of the property class; selecting an ISO 4762 variant
+switches the head type to socket and fills dk, k, socket size s, socket depth
+t and its own dW. The nut stays an ISO 4032 hexagon nut. Catalog values are
+editable; overrides survive bolt-length changes.
+
+The head bearing diameter **dW** drives the R10 bearing area
+`Ap = π/4·(dW²−dha²)`, the deformation-cone start diameter (βL = lP/dW,
+y = DA′/dW) and the R13 bearing friction diameter `DKm = (dW+dha)/2`; with a
+washer the effective annulus is `min(dW, Do)`. The section drawing shows the
+hex head at its width across corners e = 2s/√3 (socket heads at dk), the dW
+bearing face with a dimension line, and the effective bearing annulus
+highlighted under the head and nut. Head s, dk and socket sizes are
+drawing-only; blank or inconsistent values are estimated from dW. Suggested lengths and
 geometry/class combinations do not guarantee commercial availability.
 
 | Class | Minimum Rm / Rp0.2 | τB/Rm | Reference |
@@ -130,7 +143,10 @@ When the class or retained source identifies an A2 bolt, the ISO 898-1
 steel-bolt fatigue reference formula is not applied. For a completely manual
 material with no identifying class or source, supply the appropriate product
 fatigue data rather than relying on the steel-bolt default.
-For alternating axial load, enter the actual product's **fatigue strength
+The σA field is **blank by default**: for 8.8/10.9/12.9 a blank field means
+the program calculates σASV/σASG (and σAZS for finite life) with the VDI R9
+formulas, shown in the report under R9. For A2 bolts under
+alternating axial load, enter the actual product's **fatigue strength
 amplitude σA** for the selected life, mean stress, geometry and reference
 section. It is the resistance before division by the required safety factor;
 the program uses it directly for `SD = σA / σa` without applying additional

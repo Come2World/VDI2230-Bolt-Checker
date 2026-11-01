@@ -95,6 +95,10 @@ def relevant(path: str, values: dict[str, Any]) -> bool:
         return values.get("joint.type") == "DSV"
     if path.startswith("tapped."):
         return values.get("joint.type") == "ESV"
+    if path == "bolt.head_width_across_flats":
+        return values.get("bolt.head_type") == "hex"
+    if path in ("bolt.head_diameter", "bolt.socket_size", "bolt.socket_depth"):
+        return values.get("bolt.head_type") == "socket"
     if path == "load_introduction.n":
         return values.get("load_introduction.mode") == "manual"
     if path in ("load_introduction.joint_class", "load_introduction.la_over_h", "load_introduction.ak_over_h"):

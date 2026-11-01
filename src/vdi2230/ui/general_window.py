@@ -528,7 +528,7 @@ class GeneralWindow:
         if path in CATALOG_PATHS or path in ("bolt.length", "bolt.d") or path.endswith(".material_id"):
             self._sync(skip=path)
         self._update_marker(path)
-        if path == "joint.type" or path.endswith(".mode"):
+        if path in ("joint.type", "bolt.head_type", *CATALOG_PATHS) or path.endswith(".mode"):
             self.apply_visibility()
         if message:
             self.status_var.set(self.t(message))

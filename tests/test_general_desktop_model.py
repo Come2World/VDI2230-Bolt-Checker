@@ -158,6 +158,27 @@ class GeneralFormModelTests(unittest.TestCase):
         self.assertNotEqual(model.values["bolt.head_bearing_diameter"], 17.0)
         self.assertEqual(model.source_for("bolt.head_bearing_diameter"), "catalog:ISO4014-M16x2.0")
 
+    def test_socket_variant_switches_head_type_and_visible_head_fields(self):
+        model = self.model
+        self.assertTrue(model.is_relevant("bolt.head_width_across_flats"))
+        self.assertFalse(model.is_relevant("bolt.head_diameter"))
+        self.assertIsNone(model.set_value("bolt.catalog_variant_id", "ISO4762-M12x1.75"))
+        self.assertEqual(model.values["bolt.head_type"], "socket")
+        self.assertEqual(model.values["bolt.head_bearing_diameter"], 17.23)
+        self.assertEqual(model.values["bolt.head_diameter"], 18.0)
+        self.assertEqual(model.values["nut.width_across_flats"], 18.0)
+        self.assertEqual(model.source_for("bolt.head_type"), "catalog:ISO4762-M12x1.75")
+        for path in ("bolt.head_diameter", "bolt.socket_size", "bolt.socket_depth"):
+            self.assertTrue(model.is_relevant(path), path)
+        self.assertFalse(model.is_relevant("bolt.head_width_across_flats"))
+        model.set_value("bolt.length", 50.0)
+        self.assertIsNone(model.values["bolt.thread_length"])
+        outcome = model.calculate()
+        self.assertTrue(outcome.ok, outcome.error)
+        # DSV: βL = lP / mean(dW head, dW nut) uses the ISO 4762 head dW.
+        mean_dw = (17.23 + model.values["nut.bearing_diameter"]) / 2
+        self.assertAlmostEqual(outcome.result.value("βL") * mean_dw, sum(layer.values["thickness"] for layer in model.layers))
+
     def test_property_class_updates_strength(self):
         self.model.set_value("bolt.property_class", "10.9")
         self.assertEqual(self.model.values["bolt.yield_strength"], 940)

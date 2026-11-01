@@ -72,6 +72,11 @@ TABLE_MODES = (("table", "查表"), ("manual", "手动"))
 CONE_MODES = (("auto", "自动"), ("TBJ", "DSV 锥公式 (43)"), ("TTJ", "ESV 锥公式 (42)"))
 W_MODES = (("auto", "自动"), ("1", "w = 1"), ("2", "w = 2"))
 SIDES = (("head", "螺栓头"), ("nut", "螺母"))
+DRAWING_ONLY_HELP = "仅用于剖面图；留空或与 dW 不协调时按 dW 估算"
+HEAD_DRAWING_PATHS = frozenset({
+    "bolt.head_width_across_flats", "bolt.head_diameter", "bolt.socket_size", "bolt.socket_depth",
+})
+FATIGUE_HELP = "留空 = 8.8/10.9/12.9 按 VDI R9 计算 σASV/σASG（见报告 R9）；A2 有交变载荷时须输入产品值"
 SV_CLASSES = tuple((f"SV{i}", f"SV{i}") for i in range(1, 7))
 
 
@@ -100,6 +105,10 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
     _f("bolt.stress_area", "应力截面 AS", "mm²", 84.266, "bolt", **POSITIVE),
     _f("bolt.head_bearing_diameter", "头部支承直径 dW", "mm", 16.63, "bolt", **POSITIVE),
     _f("bolt.head_height", "头高 k", "mm", 7.5, "bolt", **POSITIVE),
+    _f("bolt.head_width_across_flats", "头部对边 s", "mm", 18.0, "bolt", optional=True, help=DRAWING_ONLY_HELP, **POSITIVE),
+    _f("bolt.head_diameter", "头部直径 dk", "mm", None, "bolt", optional=True, help=DRAWING_ONLY_HELP, **POSITIVE),
+    _f("bolt.socket_size", "内六角对边 s", "mm", None, "bolt", optional=True, help=DRAWING_ONLY_HELP, **POSITIVE),
+    _f("bolt.socket_depth", "内六角深度 t", "mm", None, "bolt", optional=True, help=DRAWING_ONLY_HELP, **POSITIVE),
     _f("bolt.length", "螺栓长度 l", "mm", 70.0, "bolt", **POSITIVE),
     _f("bolt.thread_length", "螺纹长度 b", "mm", 30.0, "bolt", optional=True, help="留空 = 全螺纹", **POSITIVE),
     _f("bolt.shank_diameter", "杆径 dT", "mm", None, "bolt", optional=True, help="留空 = d；小于 d 为细腰杆", **POSITIVE),
@@ -111,7 +120,7 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
        help="非 A2 留空 = 1.2·Rm；A2 螺纹脱扣校核须输入实际值", **POSITIVE),
     _f("bolt.shear_ratio", "剪切强度比 τB/Rm", "", 0.65, "bolt", minimum=0.3, maximum=1.2),
     _f("bolt.fatigue_strength_amplitude", "产品疲劳强度幅 σA", "MPa", None, "bolt", optional=True,
-       help="按实际螺栓、工况和寿命输入；用于 SD，不再套用默认疲劳公式", **POSITIVE),
+       help=FATIGUE_HELP, **POSITIVE),
     _f("bolt.rolling", "螺纹滚压", "", "SV", "bolt", kind="choice", choices=ROLLING),
     _f("bolt.thread_friction", "螺纹摩擦 μG", "", 0.12, "bolt", **FRICTION),
     _f("bolt.bearing_friction", "支承摩擦 μK", "", 0.12, "bolt", help="独立输入；拧紧侧螺栓头/螺母与垫片或板面的摩擦", **FRICTION),
@@ -205,6 +214,10 @@ class BoltInput:
     stress_area: float
     head_bearing_diameter: float
     head_height: float
+    head_width_across_flats: float | None
+    head_diameter: float | None
+    socket_size: float | None
+    socket_depth: float | None
     length: float
     thread_length: float | None
     shank_diameter: float | None
@@ -526,6 +539,9 @@ def parse_general_input(data: Any) -> GeneralInput:
         property_class = values["bolt"].get("property_class")
         is_a2_90 = isinstance(property_class, str) and property_class.upper() == "A2-90"
         if spec.path == "bolt.shear_ratio" and engineering_data.is_a2_bolt_class(property_class) and name not in payload:
+            raw = None
+        # Drawing-only head sizes absent from older files fall back to dW-based estimates.
+        if spec.path in HEAD_DRAWING_PATHS and name not in payload:
             raw = None
         if spec.diameter_factor is not None and name not in payload:
             diameter = values["bolt"].get("d")

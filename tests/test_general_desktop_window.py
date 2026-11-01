@@ -326,6 +326,21 @@ class GeneralWindowTests(unittest.TestCase):
         self.assertTrue(window.calculate_now().ok)
         self.assertIn("M16", window.report())
 
+    def test_socket_catalog_variant_shows_socket_fields_and_draws_socket_head(self):
+        window = self.window
+        self.assertTrue(window.is_field_visible("bolt.head_width_across_flats"))
+        self.assertFalse(window.is_field_visible("bolt.socket_size"))
+        self.set_choice("bolt.catalog_variant_id", "ISO4762-M16x2.0")
+        self.assertEqual(window._vars["bolt.head_diameter"].get(), "24")
+        self.assertEqual(window._vars["bolt.head_bearing_diameter"].get(), "23.17")
+        for path in ("bolt.head_diameter", "bolt.socket_size", "bolt.socket_depth"):
+            self.assertTrue(window.is_field_visible(path), path)
+        self.assertFalse(window.is_field_visible("bolt.head_width_across_flats"))
+        self.assertTrue(window.calculate_now().ok)
+        self.assertTrue(window.canvas.find_withtag("bearing-head"))
+        self.assertTrue(window.canvas.find_withtag("dim-dW"))
+        self.assertIn("ISO4762-M16x2.0", window.report())
+
     def test_a2_grade_errors_recovery_and_bilingual_fatigue_review(self):
         window = self.window
         self.set_choice("bolt.property_class", "A2-90")

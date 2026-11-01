@@ -60,7 +60,7 @@ class BoltVariant:
     minor_diameter: float
     stress_area: float
     head_height: float
-    width_across_flats: float
+    width_across_flats: float | None
     threading: str
     thread_lengths: tuple[float | None, float | None, float | None]
     head_bearing_diameter: float
@@ -68,15 +68,27 @@ class BoltVariant:
     nut_height: float
     nut_bearing_diameter: float
     verification_status: str
+    head_type: str = "hex"
+    head_diameter: float | None = None
+    socket_size: float | None = None
+    socket_depth: float | None = None
+    full_thread_max_length: float | None = None
+    nut_width_across_flats: float | None = None
 
     @property
     def label(self) -> str:
         return f"{self.standard} M{self.nominal_diameter:g}×{self.pitch:g}"
 
     def thread_length_for(self, length: float) -> float | None:
-        """ISO 4014 reference thread length b by nominal length; None = full thread."""
+        """Reference thread length b by nominal length; None = full thread.
+
+        ISO 4014 selects b1/b2/b3 by length; ISO 4762 is fully threaded up to
+        its tabulated limit and uses the single reference b above it.
+        """
         if self.threading == "full":
             return None
+        if self.full_thread_max_length is not None:
+            return None if length <= self.full_thread_max_length else self.thread_lengths[0]
         b1, b2, b3 = self.thread_lengths
         value = b1 if length <= 125 else b2 if length <= 200 else b3
         if value is None:
@@ -124,6 +136,10 @@ class MaterialRecord:
     verification_status: str
 
 
+def _optional_float(value: Any) -> float | None:
+    return None if value is None else float(value)
+
+
 @lru_cache(maxsize=1)
 def bolt_variants() -> tuple[BoltVariant, ...]:
     catalog = _bolt_catalog()
@@ -144,14 +160,17 @@ def bolt_variants() -> tuple[BoltVariant, ...]:
             minor_diameter=float(size["external_thread_minor_diameter_d3_mm"]),
             stress_area=float(size["tensile_stress_area_as_mm2"]),
             head_height=float(row["head_height_k_mm"]),
-            width_across_flats=float(row["width_across_flats_s_mm"]),
+            width_across_flats=_optional_float(row.get("width_across_flats_s_mm")),
             threading=row["threading"],
             thread_lengths=(
-                row["thread_length_b1_mm"],
-                row["thread_length_b2_mm"],
-                row["thread_length_b3_mm"],
+                (row["thread_length_b_mm"], None, None) if "thread_length_b_mm" in row else (
+                    row["thread_length_b1_mm"],
+                    row["thread_length_b2_mm"],
+                    row["thread_length_b3_mm"],
+                )
             ),
-            head_bearing_diameter=float(joint["head_bearing_diameter_dw_min_mm"]),
+            # Socket screws carry their own dw; hex bolts share the ISO 4014 joint record.
+            head_bearing_diameter=float(row.get("head_bearing_diameter_dw_mm", joint["head_bearing_diameter_dw_min_mm"])),
             clearance_holes=(
                 float(joint["clearance_hole_fine_mm"]),
                 float(joint["clearance_hole_medium_mm"]),
@@ -159,6 +178,12 @@ def bolt_variants() -> tuple[BoltVariant, ...]:
             ),
             nut_height=float(joint["nut_iso4032_height_m_max_mm"]),
             nut_bearing_diameter=float(joint["nut_iso4032_bearing_diameter_dw_min_mm"]),
+            nut_width_across_flats=float(joint["nut_iso4032_width_across_flats_s_mm"]),
+            head_type=row.get("head_type", "hex"),
+            head_diameter=_optional_float(row.get("head_diameter_dk_mm")),
+            socket_size=_optional_float(row.get("socket_size_s_mm")),
+            socket_depth=_optional_float(row.get("socket_depth_t_mm")),
+            full_thread_max_length=_optional_float(row.get("full_thread_max_length_mm")),
             verification_status=(
                 "accepted_baseline" if statuses == {"accepted_baseline"}
                 else "provisional_conflict" if "provisional_conflict" in statuses else "provisional"
@@ -336,7 +361,7 @@ def bolt_catalog_values(
     strength = property_class_record(property_class, variant.nominal_diameter)
     ratio = shear_strength_ratio(property_class)
     return {
-        "bolt.head_type": "hex",
+        "bolt.head_type": variant.head_type,
         "bolt.d": variant.nominal_diameter,
         "bolt.pitch": variant.pitch,
         "bolt.d2": variant.pitch_diameter,
@@ -344,6 +369,10 @@ def bolt_catalog_values(
         "bolt.stress_area": round(variant.stress_area, 3),
         "bolt.head_bearing_diameter": variant.head_bearing_diameter,
         "bolt.head_height": variant.head_height,
+        "bolt.head_width_across_flats": variant.width_across_flats,
+        "bolt.head_diameter": variant.head_diameter,
+        "bolt.socket_size": variant.socket_size,
+        "bolt.socket_depth": variant.socket_depth,
         "bolt.thread_length": variant.thread_length_for(length),
         "bolt.shank_diameter": variant.nominal_diameter,
         "bolt.youngs_modulus": (
@@ -356,13 +385,14 @@ def bolt_catalog_values(
         "joint.hole_diameter": variant.clearance_holes[1],
         "nut.height": variant.nut_height,
         "nut.bearing_diameter": variant.nut_bearing_diameter,
-        "nut.width_across_flats": variant.width_across_flats,
+        "nut.width_across_flats": variant.nut_width_across_flats,
     }
 
 
 STRENGTH_PATHS = frozenset({"bolt.yield_strength", "bolt.tensile_strength"})
 SHEAR_RATIO_PATH = "bolt.shear_ratio"
 CATALOG_GEOMETRY_PATHS = (
+    "bolt.head_type",
     "bolt.d",
     "bolt.pitch",
     "bolt.d2",
@@ -370,6 +400,10 @@ CATALOG_GEOMETRY_PATHS = (
     "bolt.stress_area",
     "bolt.head_bearing_diameter",
     "bolt.head_height",
+    "bolt.head_width_across_flats",
+    "bolt.head_diameter",
+    "bolt.socket_size",
+    "bolt.socket_depth",
     "bolt.thread_length",
     "bolt.shank_diameter",
     "bolt.youngs_modulus",
@@ -440,6 +474,7 @@ def catalog_summary() -> dict[str, Any]:
                 "label": variant.label,
                 "nominal_diameter": variant.nominal_diameter,
                 "threading": variant.threading,
+                "head_type": variant.head_type,
             }
             for variant in bolt_variants()
         ],

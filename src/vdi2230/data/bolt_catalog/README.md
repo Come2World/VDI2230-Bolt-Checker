@@ -1,14 +1,17 @@
-# 外六角螺栓目录
+# 螺栓目录（外六角 / 内六角）
 
 ## 目录范围
 
-`catalog.json` 是可版本化的螺栓参数目录，当前目录版本为 `0.4.0`，覆盖：
+`catalog.json` 是可版本化的螺栓参数目录，当前目录版本为 `0.5.0`，覆盖：
 
 - ISO 4014 部分螺纹外六角螺栓和 ISO 4017 全螺纹外六角螺栓。
+- ISO 4762 内六角圆柱头螺钉：M6、M8、M10、M12、M14、M16、M20、M24、M30（标准不含 M18/M22/M27）。
+  尺寸取自 [fasteners.eu ISO 4762 表](https://www.fasteners.eu/standards/ISO/4762/)（事实尺寸，转录自公开二级表格）。
+  头部几何与强度等级无关，可与任意目录强度等级组合。
 - M6–M30 公制粗牙，12 个公称直径。
 - 强度等级 8.8、10.9、12.9、A2-70、A2-80 和 A2-90（厂商参考）。
 - 标准长度建议值及用户自定义长度路径。
-- `joint_dimension_records`：ISO 4014 支承直径 `dw,min`、ISO 273 通孔（精/中/粗）以及 ISO 4032 螺母高度与支承直径。
+- `joint_dimension_records`：ISO 4014 支承直径 `dw,min`、ISO 273 通孔（精/中/粗）以及 ISO 4032 螺母高度、支承直径与对边宽度。
 
 目录随 Python 包分发（`src/vdi2230/data/bolt_catalog/`），程序通过 `vdi2230.data` 加载；同级目录还有 `plate_materials.json`（VDI 2230 表 A9 板材材料）与 `vdi_tables.json`（表 2、5、7、A5、A8）。
 
@@ -55,15 +58,20 @@ ESV/非标准螺母 R11 还需实际 Rm,max，非标准螺母需其自身抗拉�
 | `external_thread_minor_diameter_d3_mm` | 外螺纹小径 | mm；采信的派生值 |
 | `tensile_stress_area_as_mm2` | 螺纹应力截面积 | mm²；采信的公式派生值 |
 | `area_a0_mm2` | VDI 2230 定义下的 `A0` | 当前为空；先确认符号定义及适用截面 |
-| `head_height_k_mm` | 六角头高度 | mm |
-| `width_across_flats_s_mm` | 对边宽度 | mm |
+| `head_type` | 头部形式：`hex` 外六角 / `socket` 内六角圆柱头 | — |
+| `head_height_k_mm` | 头高 k | mm；ISO 4762 取 k,max |
+| `width_across_flats_s_mm` | 外六角对边宽度 | mm；仅外六角行 |
+| `head_diameter_dk_mm` | 圆柱头直径 dk | mm；ISO 4762 取 dk,max，仅用于绘图 |
+| `socket_size_s_mm` / `socket_depth_t_mm` | 内六角对边 s / 最小深度 t | mm；仅用于绘图 |
+| `head_bearing_diameter_dw_mm` | ISO 4762 头部支承直径 dw,min | mm；优先于连接记录中的外六角 dw |
+| `thread_length_b_mm` / `full_thread_max_length_mm` | ISO 4762 参考螺纹长度 b（2d+12）/ 全螺纹长度上限 | mm；l ≤ 上限时为全螺纹 |
 | `head_corner_diameter_e_mm` | 对角尺寸 | mm；发现来源冲突时记录在 `field_conflicts` |
 | `thread_length_b1/b2/b3_mm` | ISO 4014 依长度段适用的螺纹长度 | mm；长度边界需按标准版本复核 |
 | `unthreaded_shank_length_h_mm` | ISO 4017 页面列出的无螺纹杆段参数 | mm |
 | `property_class_records` | 强度等级、软件目录直径区间、最低强度/可选证明应力 | MPa；采信记录不代表所有实际产品均适用，A2-90 另有适用性提示 |
 | `head_bearing_diameter_dw_min_mm` | 螺栓头支承面外径 `dw,min` | mm；保留二级来源记录，项目采信 |
 | `clearance_hole_fine/medium/coarse_mm` | ISO 273 通孔直径 | mm；默认取中等系列 |
-| `nut_iso4032_height_m_max_mm` / `nut_iso4032_bearing_diameter_dw_min_mm` | ISO 4032 螺母高度与支承直径 | mm；保留二级来源记录，项目采信 |
+| `nut_iso4032_height_m_max_mm` / `nut_iso4032_bearing_diameter_dw_min_mm` / `nut_iso4032_width_across_flats_s_mm` | ISO 4032 螺母高度、支承直径与对边 | mm；保留二级来源记录，项目采信 |
 | `candidate_nominal_lengths_mm` | 上游项目的通用候选长度 | mm；未按直径/标准验证，不作为权威标准长度表 |
 
 `A0` 不与 `As` 混用。数据库暂不为 `A0` 填值，以免在未确认 VDI 符号定义、危险截面和公式用途前误用。

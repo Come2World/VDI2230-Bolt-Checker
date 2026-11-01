@@ -3,7 +3,8 @@ import unittest
 from test_general_engine import b1_payload, b2_payload, b3_payload
 from vdi2230.calculations.general import calculate_general
 from vdi2230.domain.general_inputs import default_input_json, default_layer, parse_general_input
-from vdi2230.infrastructure.general_section import general_section_shapes
+from vdi2230.data import bolt_catalog_values
+from vdi2230.infrastructure.general_section import general_section_shapes, section_target
 
 
 def shapes_for(payload, width=640, height=560):
@@ -125,6 +126,60 @@ class GeneralSectionTests(unittest.TestCase):
         self.assertEqual(len(compact), 1)
         self.assertIn("板 10", compact[0].text)
         self.assertIn("h 3", compact[0].text)
+
+    def _scale(self, item, shapes):
+        plates = [s for s in shapes if s.role.startswith("plate-") and s.kind == "rect"]
+        left, right = min(s.points[0] for s in plates), max(s.points[2] for s in plates)
+        return (right - left) / item.joint.outer_diameter
+
+    def test_hex_head_shows_corners_and_dw_bearing_face(self) -> None:
+        item, _, shapes = shapes_for(default_input_json())
+        scale = self._scale(item, shapes)
+        head = [s for s in shapes if s.role == "bolt-head"]
+        outline = head[0].points[0::2]
+        self.assertAlmostEqual((max(outline) - min(outline)) / scale, 18.0 * 2 / 3 ** 0.5, places=6)
+        collar = next(s for s in head if s.kind == "rect")
+        self.assertAlmostEqual((collar.points[2] - collar.points[0]) / scale, item.bolt.head_bearing_diameter, places=6)
+        dimension = [s for s in shapes if s.role == "dim-dW" and s.kind == "text"]
+        self.assertEqual([s.text for s in dimension], ["dW 16.63"])
+        ring = [s for s in shapes if s.role == "bearing-head"]
+        self.assertEqual(len(ring), 2)
+        for line in ring:
+            span = sorted(abs(x - (head[0].points[0] + head[0].points[-2]) / 2) for x in line.points[0::2])
+            self.assertAlmostEqual(2 * span[0] / scale, item.bearing_inner("head"), places=6)
+            self.assertAlmostEqual(2 * span[1] / scale, item.bearing_outer("head"), places=6)
+        self.assertEqual(len([s for s in shapes if s.role == "bearing-nut"]), 2)
+
+    def test_socket_head_draws_dk_body_dw_underside_and_socket(self) -> None:
+        payload = default_input_json()
+        for path, value in bolt_catalog_values("ISO4762-M12x1.75", 70, "12.9").items():
+            section, name = path.split(".")
+            payload[section][name] = value
+        item, _, shapes = shapes_for(payload)
+        scale = self._scale(item, shapes)
+        body, recess, *edges = [s for s in shapes if s.role == "bolt-head"]
+        xs = body.points[0::2]
+        self.assertAlmostEqual((max(xs) - min(xs)) / scale, 18.0, places=6)
+        self.assertAlmostEqual((xs[-1] - xs[0]) / scale, 17.23, places=6)
+        recess_x = recess.points[0::2]
+        self.assertAlmostEqual((max(recess_x) - min(recess_x)) / scale, 10.0, places=6)
+        self.assertAlmostEqual((recess.points[3] - recess.points[1]) / scale, 6.0, places=6)
+        self.assertEqual(len(edges), 2)
+        self.assertIn("内六角", next(s.text for s in shapes if s.role == "label-head" and s.kind == "text"))
+
+    def test_stale_head_sizes_never_draw_head_smaller_than_dw(self) -> None:
+        payload = default_input_json()
+        payload["bolt"]["head_bearing_diameter"] = 25.0
+        payload["bolt"]["head_width_across_flats"] = 18.0
+        item, _, shapes = shapes_for(payload)
+        scale = self._scale(item, shapes)
+        outline = next(s for s in shapes if s.role == "bolt-head").points[0::2]
+        self.assertGreater((max(outline) - min(outline)) / scale, 25.0)
+
+    def test_dw_parts_are_clickable_targets(self) -> None:
+        self.assertEqual(section_target("bearing-head"), "bolt.head_bearing_diameter")
+        self.assertEqual(section_target("dim-dW"), "bolt.head_bearing_diameter")
+        self.assertEqual(section_target("bearing-nut"), "nut.bearing_diameter")
 
     def test_title_mentions_bolt_and_joint_type(self) -> None:
         _, _, shapes = shapes_for(default_input_json())

@@ -83,8 +83,11 @@ class CatalogLookupTests(unittest.TestCase):
         self.assertEqual(values["nut.width_across_flats"], 18.0)
         self.assertEqual(
             set(data.catalog_value_sources("ISO4014-M12x1.75", "10.9")),
-            set(values) - {"bolt.head_type"},
+            set(values),
         )
+        self.assertEqual(values["bolt.head_type"], "hex")
+        self.assertEqual(values["bolt.head_width_across_flats"], 18.0)
+        self.assertIsNone(values["bolt.head_diameter"])
         self.assertEqual(
             data.bolt_catalog_values("ISO4017-M12x1.75", 60, "8.8")["bolt.thread_length"],
             None,
@@ -95,6 +98,25 @@ class CatalogLookupTests(unittest.TestCase):
         self.assertEqual(variant.thread_length_for(125), variant.thread_lengths[0])
         self.assertEqual(variant.thread_length_for(150), variant.thread_lengths[1])
 
+    def test_iso4762_socket_values_use_own_dw_and_hex_nut(self):
+        values = data.bolt_catalog_values("ISO4762-M12x1.75", 60, "12.9")
+        self.assertEqual(values["bolt.head_type"], "socket")
+        self.assertEqual(values["bolt.head_bearing_diameter"], 17.23)
+        self.assertEqual(values["bolt.head_height"], 12.0)
+        self.assertEqual(values["bolt.head_diameter"], 18.0)
+        self.assertEqual(values["bolt.socket_size"], 10.0)
+        self.assertEqual(values["bolt.socket_depth"], 6.0)
+        self.assertIsNone(values["bolt.head_width_across_flats"])
+        # The nut stays an ISO 4032 hexagon nut, never the 10 mm socket key size.
+        self.assertEqual(values["nut.width_across_flats"], 18.0)
+        self.assertEqual(values["nut.bearing_diameter"], data.bolt_catalog_values("ISO4014-M12x1.75", 60, "12.9")["nut.bearing_diameter"])
+
+    def test_iso4762_thread_length_is_full_up_to_tabulated_limit(self):
+        variant = data.bolt_variant("ISO4762-M12x1.75")
+        self.assertIsNone(variant.thread_length_for(50))
+        self.assertEqual(variant.thread_length_for(55), 36.0)
+        self.assertEqual(variant.thread_length_for(200), 36.0)
+
     def test_property_class_ranges_and_summary(self):
         self.assertEqual(data.property_class_record("8.8", 16).tensile_strength, 800)
         self.assertEqual(data.property_class_record("8.8", 20).tensile_strength, 830)
@@ -102,7 +124,8 @@ class CatalogLookupTests(unittest.TestCase):
             data.property_class_record("8.8", 36)
         summary = data.catalog_summary()
         self.assertEqual(summary["property_classes"], ["8.8", "10.9", "12.9", "A2-70", "A2-80", "A2-90"])
-        self.assertEqual(len(summary["bolts"]), 24)
+        self.assertEqual(len(summary["bolts"]), 33)
+        self.assertEqual(sum(bolt["head_type"] == "socket" for bolt in summary["bolts"]), 9)
         self.assertEqual(len(summary["materials"]), 36)
 
     def test_a2_catalog_values_and_sources_cover_catalog_sizes(self):
