@@ -1,7 +1,7 @@
 """Tk desktop front end for the general calculator.
 
 Three-pane layout: tabbed inputs, an interactive 2D
-section (click a plate to edit it) and tabbed results with TXT export.
+section (click a plate to edit it), JSON project files and Markdown reports.
 All state lives in :class:`GeneralFormModel`; this module only binds widgets.
 """
 from __future__ import annotations
@@ -17,6 +17,8 @@ from typing import Any, Callable
 from vdi2230.i18n import Language, format_text, language_code, translate
 
 from vdi2230.domain.models import ResultStatus
+from vdi2230.domain.general_inputs import InputValidationError
+from vdi2230.infrastructure.project_file import load_general_project, save_general_project, write_text_atomic
 from vdi2230.infrastructure.general_section import (
     DRAWING_BACKGROUND, MAX_VIEW, MIN_VIEW, MUTED_TEXT, PLATE_STROKE, TEXT_FILL, general_section_shapes,
 )
@@ -111,6 +113,8 @@ class GeneralWindow:
         self._sections: list[tuple[ttk.Label, list[str]]] = []
         self._error_paths: list[str] = []
         self._edit_notice: str | None = None
+        self.project_path: Path | None = None
+        self._saved_inputs = self.model.to_input_json()
 
         root.title(self.t("VDI 2230 螺栓连接计算 · 通用"))
         geometry, min_size = fit_window(root.winfo_screenwidth(), root.winfo_screenheight())
@@ -124,6 +128,7 @@ class GeneralWindow:
         root.bind_all("<Button-4>", self._on_wheel, add="+")
         root.bind_all("<Button-5>", self._on_wheel, add="+")
         self.calculate_now()
+        root.protocol("WM_DELETE_WINDOW", self.request_close)
 
     def t(self, text: str) -> str:
         return translate(text, self.language)
@@ -157,14 +162,7 @@ class GeneralWindow:
         changed = self.model.set_language(language)
         self.language = language
         self.root.title(self.t("VDI 2230 螺栓连接计算 · 通用"))
-        self.topbar.destroy()
-        self.panes.destroy()
-        self._vars.clear()
-        self._rows.clear()
-        self._widgets.clear()
-        self._choices.clear()
-        self._sections.clear()
-        self._build()
+        self._rebuild()
         self.input_tabs.select(selected)
         self.result_tabs.select(result_tab)
         self.filter_var.set(query)
@@ -191,6 +189,16 @@ class GeneralWindow:
         return format_text("选中：{name}", self.language, name=f"{index + 1}. {name}")
 
     # ----- layout -----
+
+    def _rebuild(self) -> None:
+        self.topbar.destroy()
+        self.panes.destroy()
+        self._vars.clear()
+        self._rows.clear()
+        self._widgets.clear()
+        self._choices.clear()
+        self._sections.clear()
+        self._build()
 
     def _configure_style(self) -> None:
         for name in ("TkDefaultFont", "TkTextFont", "TkHeadingFont"):
@@ -248,6 +256,10 @@ class GeneralWindow:
         self.title_var = tk.StringVar(value=self.model.title)
         ttk.Entry(top, textvariable=self.title_var, width=28).pack(side=tk.LEFT, padx=(10, 0))
         self.title_var.trace_add("write", self._on_title)
+        self.save_button = ttk.Button(top, text="保存项目", command=self.save_project)
+        self.save_button.pack(side=tk.LEFT, padx=(8, 2))
+        self.load_button = ttk.Button(top, text="加载项目", command=self.load_project)
+        self.load_button.pack(side=tk.LEFT, padx=2)
         self.language_var = tk.StringVar(value="中文" if self.language == "zh" else "English")
         self.language_selector = ttk.Combobox(top, textvariable=self.language_var, values=("中文", "English"), width=7, state="readonly")
         self.language_selector.pack(side=tk.RIGHT, padx=4)
@@ -413,7 +425,7 @@ class GeneralWindow:
         head = ttk.Frame(parent)
         head.pack(fill=tk.X)
         ttk.Label(head, text="计算结果", style="ResultHead.TLabel").pack(side=tk.LEFT)
-        self.export_button = ttk.Button(head, text="导出 TXT", command=self.export_report, state=tk.DISABLED, style="Primary.TButton")
+        self.export_button = ttk.Button(head, text="导出 Markdown", command=self.export_report, state=tk.DISABLED, style="Primary.TButton")
         self.export_button.pack(side=tk.RIGHT)
         self.banner = tk.Label(parent, anchor="w", justify=tk.LEFT, padx=6, pady=4, wraplength=360,
                                background=PANEL, foreground=TEXT_FILL)
@@ -858,21 +870,125 @@ class GeneralWindow:
 
     # ----- actions -----
 
-    def export_report(self, path: str | Path | None = None) -> Path | None:
-        if self.outcome is None or not self.outcome.ok:
+    def save_project(self, path: str | Path | None = None) -> Path | None:
+        outcome = self.calculate_now()
+        if not outcome.ok:
+            messagebox.showerror(self.t("保存失败"), self._outcome_error(outcome), parent=self.root)
             return None
+        assert outcome.result is not None
         if path is None:
-            title = _FILENAME_UNSAFE.sub("_", self.model.title.strip() or self.t("通用螺栓连接"))[:60]
+            title = _FILENAME_UNSAFE.sub("_", outcome.result.input.title)[:60]
             chosen = filedialog.asksaveasfilename(
-                parent=self.root, title=self.t("导出计算报告"), defaultextension=".txt",
-                initialfile=f"VDI2230-{title}.txt", filetypes=[(self.t("文本文件"), "*.txt")],
+                parent=self.root, title=self.t("保存项目"), defaultextension=".json",
+                initialfile=self.project_path.name if self.project_path else f"VDI2230-{title}.json",
+                initialdir=str(self.project_path.parent) if self.project_path else None,
+                filetypes=[(self.t("项目文件"), "*.json")],
             )
             if not chosen:
                 return None
             path = chosen
         target = Path(path)
         try:
-            target.write_text(self.outcome.report, encoding="utf-8")
+            save_general_project(target, outcome.result.input)
+        except OSError as exc:
+            messagebox.showerror(self.t("保存失败"), str(exc), parent=self.root)
+            return None
+        self.project_path = target
+        self._saved_inputs = self.model.to_input_json()
+        self.status_var.set(format_text("已保存 {name}", self.language, name=target.name))
+        return target
+
+    def _outcome_error(self, outcome: Outcome) -> str:
+        details = "\n".join(f"{self.t(self.model.label_for(error.path))}: {error.message}" for error in outcome.field_errors)
+        return outcome.error + ("\n" + details if details else "")
+
+    def _confirm_replace(self) -> bool:
+        if self.model.to_input_json() == self._saved_inputs:
+            return True
+        answer = messagebox.askyesnocancel(self.t("未保存的修改"), self.t("当前项目有未保存的修改。是否先保存？"),
+                                          parent=self.root)
+        if answer is None:
+            return False
+        return not answer or self.save_project() is not None
+
+    def load_project(self, path: str | Path | None = None) -> Path | None:
+        if path is None:
+            chosen = filedialog.askopenfilename(
+                parent=self.root, title=self.t("加载项目"), filetypes=[(self.t("项目文件"), "*.json")],
+            )
+            if not chosen:
+                return None
+            path = chosen
+        target = Path(path)
+        candidate = self._load_candidate(target)
+        if candidate is None:
+            return None
+        saved_inputs = self._saved_inputs
+        if not self._confirm_replace():
+            return None
+        # Saving in the confirmation dialog may overwrite the file selected for loading.
+        if self._saved_inputs is not saved_inputs:
+            candidate = self._load_candidate(target)
+            if candidate is None:
+                return None
+        for job in (self._calc_job, self._draw_job):
+            if job is not None:
+                self.root.after_cancel(job)
+        self._calc_job = self._draw_job = None
+        self.model = candidate
+        self._last_good = None
+        self._last_good_names = ()
+        self._edit_notice = None
+        self._error_paths = []
+        self.project_path = target
+        self._saved_inputs = self.model.to_input_json()
+        self._rebuild()
+        self.apply_visibility()
+        self.render_layers()
+        self.calculate_now()
+        self.status_var.set(format_text("已加载 {name}", self.language, name=target.name))
+        return target
+
+    def _load_candidate(self, target: Path) -> GeneralFormModel | None:
+        try:
+            item = load_general_project(target)
+        except InputValidationError as exc:
+            details = "\n".join(f"{self.t(self.model.label_for(error.path))}: {self.t(error.message)}" for error in exc.errors)
+            messagebox.showerror(self.t("加载失败"), details, parent=self.root)
+            return None
+        except (OSError, ValueError) as exc:
+            messagebox.showerror(self.t("加载失败"), str(exc), parent=self.root)
+            return None
+        candidate = GeneralFormModel()
+        candidate.reset(item.to_json())
+        candidate.set_language(self.language)
+        outcome = candidate.calculate(self.language)
+        if not outcome.ok:
+            messagebox.showerror(self.t("加载失败"), self._outcome_error(outcome), parent=self.root)
+            return None
+        return candidate
+
+    def request_close(self) -> None:
+        if self._confirm_replace():
+            self.close()
+
+    def export_report(self, path: str | Path | None = None) -> Path | None:
+        if self._calc_job is not None:
+            self.calculate_now()
+        if self.outcome is None or not self.outcome.ok:
+            return None
+        if path is None:
+            title = _FILENAME_UNSAFE.sub("_", self.model.title.strip() or self.t("通用螺栓连接"))[:60]
+            chosen = filedialog.asksaveasfilename(
+                parent=self.root, title=self.t("导出计算报告"), defaultextension=".md",
+                initialfile=f"VDI2230-{title}.md", filetypes=[(self.t("Markdown 文件"), "*.md")],
+            )
+            if not chosen:
+                return None
+            path = chosen
+        target = Path(path)
+        try:
+            write_text_atomic(target, self.outcome.report)
         except OSError as exc:
             messagebox.showerror(self.t("导出失败"), str(exc), parent=self.root)
             return None

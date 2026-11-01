@@ -2,11 +2,11 @@
 
 | 项目 | 内容 |
 |---|---|
-| 文档版本 | 0.14 |
+| 文档版本 | 0.15 |
 | 日期 | 2026-11-01 |
 | 应用版本 | 0.0.1 |
 | 发布分支 | `VDI2230_BOLT_CHECKER_RELEASE_0.0.1` |
-| 对应需求 | [需求规格说明书](./SOFTWARE_REQUIREMENTS_SPECIFICATION.md) v1.8 |
+| 对应需求 | [需求规格说明书](./SOFTWARE_REQUIREMENTS_SPECIFICATION.md) v1.9 |
 | 当前交付 | 通用 Tk 桌面计算器；内部保留标准算例回归 |
 
 ## 1. 发布范围与裁剪原则
@@ -36,13 +36,15 @@
 | 计算 | `calculations/general.py` | 通用计算编排、指标、逐项校核及总体判定 |
 | 数据 | `data/` | 版本化螺栓、材料、表格数据与许可证 |
 | 图元 | `infrastructure/general_section.py` | 与窗口无关的 Shape 几何和部件角色 |
-| 报告 | `infrastructure/general_report.py` | 来自同一次计算的 UTF-8 TXT |
+| 报告 | `infrastructure/general_report.py` | 来自同一次计算的 UTF-8 Markdown，R1–R13 顺序 |
+| 项目文件 | `infrastructure/project_file.py` | 通用输入保存/加载、格式校验及原子写入 |
 | 翻译 | `i18n.py` | 离线消息、完整模板和来源标签 |
 | 内部回归 | `calculations/b1.py` … `b5.py` | 固定标准输入下的独立重新计算 |
 | 共享基础 | `domain/models.py`、`validation.py` | 结果、状态、来源和误差判据 |
 
-`infrastructure/report.py`、`project_file.py` 及 `ProjectSnapshot` 保留为内部
-结果审计/序列化测试的基础工具，不代表通用 Tk 已具备项目保存或载入功能。
+`infrastructure/report.py` 保留为内部参考结果审计工具；
+`project_file.py` 和 `ProjectSnapshot` 同时服务内部快照与通用 Tk 项目保存/加载，
+通用入口通过 `case_id = GENERAL` 拒绝其他内部算例快照。
 旧固定剖面模块 `domain/section.py` 和旧 UI 适配层已删除，当前绘图只走通用 Shape。
 
 依赖方向：
@@ -52,6 +54,7 @@ __main__ → GeneralWindow → GeneralFormModel
                               ├→ parse_general_input → calculate_general
                               └→ render_general_report
              └→ general_section_shapes → canvas_item → Tk Canvas
+              └→ save_general_project / load_general_project → ProjectSnapshot JSON
 
 tests → 同一通用模型 / 报告 / 图元 / Tk 控件
 tests/test_reference_cases.py → 内部固定标准算例计算器
@@ -139,6 +142,28 @@ R0 `mvorh`、R11、`SectionMetrics.engagement_length`、红色 `engaged-thread`
 不能仅给螺栓尾部增加示意矩形。Tk 切换孔型隐藏/显示 Lh，编辑尺寸走既有
 debounce/过期恢复；图元 role 映射到对应字段。报告输出解析尺寸并声明估算，
 不会将新增件厚误加到 lK。
+
+### 3.5 项目文件与 Markdown 报告
+
+顶栏保存/加载调用 `project_file.py` 的通用入口，复用现有 envelope v1；
+`inputs` 保存完整 `GeneralInput.to_json()`，`metadata` 记录应用版本，不缓存计算结果。
+保存使用当前已校验并可计算的输入；加载先创建候选表单并重算，通过后才替换当前状态。
+格式/版本/数据/IO 失败明确通知，原窗口和未完成的编辑不被替换。
+界面语言不写入项目，加载保持当前语言，名称作为用户文本保留。
+
+`_saved_inputs` 与当前输入快照比较，用于加载/关闭的未保存修改提示；
+先保存选择可能覆盖待加载路径，此时重新读取文件，不能加载保存前的缓存候选。
+取消对话框/保存失败不关闭或替换。语言切换与加载复用 `_rebuild()`，
+加载取消旧 debounce/绘图任务、清理旧有效图形，再按新数据生成全部视图。
+`write_text_atomic()` 在同目录临时文件完整写入并同步后替换目标，失败清理临时文件；
+项目和报告使用同一写入机制。
+
+`CalculationValue.calculation_step` 是可选 1–13 元数据，旧内部算例保持默认空。
+通用 `_Values` 按计算阶段标记每个结果，不改公式或数值；
+提前求出的 mvorh 标 R11，最后求出的 SD 显式标 R9。
+Markdown 报告用这项元数据顺序分组，缺失步骤显式拒绝，不能按公式字符串猜测归属。
+R1 显示用户选择的 αA；不执行自动选径。各步骤含结果/公式依据与校核状态原因，
+源输入/用户标题/板名/公式转义以保持 Markdown 结构。界面预览源码，默认导出 `.md`。
 
 ## 4. 垫片、图元与双语
 

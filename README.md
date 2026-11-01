@@ -7,7 +7,7 @@ VDI 2230 Part 1:2015: through bolt with nut (DSV) or tapped thread (ESV),
 1–10 clamped plates, solid/hollow and reduced-shank bolts, concentric axial load,
 transverse load and torque. Inputs drive the calculation, interactive 2D section
 and checks (FMzul, SF, SD, Sp, mges, FKR, SG, SA). Results can be exported as a
-UTF-8 plain-text report.
+UTF-8 Markdown report. Designs can be saved and loaded as JSON project files.
 
 **Not covered:** eccentric clamping/loading, bending, thermal effects, bolt-group
 load distribution, 3D/CAD or finite-element analysis. Loads must already be
@@ -70,7 +70,8 @@ The window opens in **English** and uses a compact three-pane layout:
   to activate the corresponding input tab and focus its field. Add, remove,
   select and move plates; adding inserts a copy below the selected plate.
 - **Right:** overall verdict, individual checks, filterable full results and
-  report preview. **Export TXT** saves the report currently displayed.
+  report source preview. **Export Markdown** saves the report currently displayed.
+  Use **Save project / Load project** in the top bar for design inputs.
 
 Calculation runs automatically about **300 ms** after an edit. An edit
 immediately disables export. Invalid inputs clear the results/report, identify
@@ -89,8 +90,37 @@ These display choices do not change calculations.
 
 The initial window is 1440×860, reduced and centered to fit smaller screens.
 Operating-system window decorations and file-dialog controls remain native.
-This release exports TXT reports; it does **not** provide design-project
-save/load controls.
+This release exports Markdown reports and saves/loads JSON design projects.
+
+## Saving projects and exporting reports
+
+- **Save project** writes a `.json` file with the title, all inputs (including
+  hidden DSV/ESV settings), ordered plates, washers and provenance. Input
+  validation and calculation must succeed; a failing or review safety check
+  does not prevent saving. Saving opens a file dialog, allowing another filename.
+- **Load project** validates the JSON format/schema and inputs, recalculates,
+  then replaces the form and section. Unsupported, corrupt or uncalculable
+  projects leave the current design unchanged. Loaded titles/plate names are
+  treated as user text; the current UI language is retained.
+- Loading another project or closing the window with changed inputs prompts
+  to save, discard or cancel. Cancelling a save keeps the design open.
+  File writes replace the target only after a complete write.
+- Project files use `vdi2230-bolt-project` envelope version 1 containing
+  `case_id: GENERAL` and nested `vdi2230.general/4` inputs. Results are **not**
+  trusted or stored; they are recalculated using the installed application.
+  Internal B1–B5 project snapshots are not desktop general projects.
+- **Export Markdown** writes UTF-8 `.md`; the report tab previews Markdown
+  source. Open the exported file in VS Code and use **Markdown: Open Preview**
+  to see the formatted headings/tables. Markdown reports cannot be loaded as
+  design projects.
+
+Section **3. Calculation steps and all results** contains R1–R13 in VDI order:
+tightening factor, required clamp load, compliances/load factor, preload losses,
+minimum preload, maximum preload, assembly strength, working strength, fatigue,
+bearing pressure, thread engagement, slip/shear, and tightening torque.
+All computed values appear once in their assigned step, with formula references;
+N/A and review checks retain explanations. R1 records the user-selected αA;
+the program does not automatically select a bolt diameter.
 
 ## Inputs and washers
 
@@ -232,7 +262,7 @@ S355J0 is an initial selection, not a claim about any purchased washer.
 ## Chinese / English
 
 The **中文 / English** selector changes labels/options, section annotations,
-checks, warnings, field errors and the TXT report together. Numerical values,
+checks, warnings, field errors and the Markdown report together. Numerical values,
 units, source identifiers and input schema do not change with the language.
 Translation is fully offline.
 
@@ -269,7 +299,8 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 The suite covers calculations, engineering data, internal standard-example
 regressions, field validation, washers, bilingual reports and actual Tk widgets.
 It exercises real debounce callbacks, part clicks, layer edits, stale drawings,
-failure recovery and TXT export. Tests need no third-party test packages.
+failure recovery, project save/load, cancelled/failed writes, and Markdown
+export with complete ordered R1–R13 results. Tests need no third-party test packages.
 Tk window tests skip when no display is available; such a run is **not** desktop
 release acceptance. Run the suite with Tk and a display for GUI validation.
 

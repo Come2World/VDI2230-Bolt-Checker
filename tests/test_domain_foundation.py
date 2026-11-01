@@ -25,6 +25,14 @@ from vdi2230.infrastructure.report import render_text_report
 
 
 class DomainFoundationTests(unittest.TestCase):
+    def test_calculation_step_metadata_is_optional_and_validated(self):
+        value = CalculationValue(symbol="d", label="Diameter", value=12, unit="mm", formula_reference="input")
+        self.assertIsNone(value.calculation_step)
+        for invalid in (0, 14, True, 1.5, "R3"):
+            with self.subTest(step=invalid), self.assertRaises(ValueError):
+                CalculationValue(symbol="d", label="Diameter", value=12, unit="mm",
+                                 formula_reference="input", calculation_step=invalid)
+
     def test_numeric_validation_and_reference_tolerance(self):
         self.assertEqual(require_finite("length", 1.25), 1.25)
         self.assertAlmostEqual(relative_error_percent(103, 100), 3)

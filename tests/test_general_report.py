@@ -1,6 +1,9 @@
 import unittest
+from collections import Counter
+from dataclasses import replace
+import re
 
-from test_general_engine import b3_payload
+from test_general_engine import b1_payload, b3_payload
 from vdi2230.calculations.general import calculate_general
 from vdi2230.domain.general_inputs import default_input_json, parse_general_input
 from vdi2230.infrastructure.general_report import render_general_report
@@ -23,6 +26,10 @@ class GeneralReportTests(unittest.TestCase):
         for check in result.checks:
             self.assertIn(check.label, text)
         self.assertTrue(text.rstrip().endswith(DISCLAIMER))
+        self.assertTrue(text.startswith("# VDI"))
+        self.assertIn("## 一、安全系数与校核", text)
+        self.assertIn("| --- | --- |", text)
+        self.assertNotIn("=" * 72, text)
 
     def test_model_assumptions_are_still_flagged(self) -> None:
         result, text = report_for(b3_payload())
@@ -46,8 +53,69 @@ class GeneralReportTests(unittest.TestCase):
         self.assertIn("共 2 层", text)
         self.assertIn("1. 板 1", text)
         self.assertIn("2. 板 2", text)
-        self.assertIn("[material:S355J0]", text)
-        self.assertIn("[catalog:ISO4014-M12x1.75]", text)
+        self.assertIn(r"\[material:S355J0\]", text)
+        self.assertIn(r"\[catalog:ISO4014-M12x1.75\]", text)
+
+    def test_r1_to_r13_order_and_every_result_appears_once_in_its_step(self):
+        payloads = [default_input_json(), b1_payload(), b3_payload()]
+        payload = default_input_json()
+        payload["bolt"]["rolling"] = "SG"
+        payload["load"].update(transverse=1000, cycles=100000)
+        payload["head_washer"]["enabled"] = True
+        payloads.append(payload)
+        for payload in payloads:
+            for language in ("zh", "en"):
+                with self.subTest(joint=payload["joint"]["type"], language=language):
+                    result = calculate_general(parse_general_input(payload))
+                    text = render_general_report(result, language=language)
+                    blocks = re.split(r"^### R(\d+) — .+$", text, flags=re.MULTILINE)
+                    self.assertEqual([int(blocks[i]) for i in range(1, len(blocks), 2)], list(range(1, 14)))
+                    steps = {int(blocks[i]): blocks[i + 1].split("\n## ", 1)[0] for i in range(1, len(blocks), 2)}
+                    occurrences = Counter()
+                    for step, body in steps.items():
+                        for symbol in re.findall(r"^\| ([^|]+?) \|", body, re.MULTILINE):
+                            occurrences[symbol] += 1
+                    for value in result.result.values:
+                        self.assertEqual(occurrences[value.symbol], 1, value.symbol)
+                        self.assertIn(f"| {value.symbol} |", steps[value.calculation_step])
+                    for symbol, step in (("FKerf", 2), ("δS", 3), ("fZ", 4), ("FMmin", 5), ("FMmax", 6),
+                                         ("FMzul", 7), ("SF", 8), ("σa", 9), ("mvorh", 11), ("FKRmin", 12), ("MA", 13)):
+                        self.assertIn(f"| {symbol} |", steps[step])
+                    self.assertIn(f"αA = {result.input.assembly.tightening_factor:g}", steps[1])
+                    if any(value.symbol == "SD" for value in result.result.values):
+                        self.assertIn("| SD |", steps[9])
+                        self.assertIn("\n\n- SD:", steps[9])
+                    self.assertEqual(result.check("mges").reference, "R11")
+
+    def test_missing_step_is_explicit_instead_of_dropping_a_result(self):
+        result = calculate_general(parse_general_input(default_input_json()))
+        value = replace(result.result.values[0], calculation_step=None)
+        result = replace(result, result=replace(result.result, values=(value,)))
+        with self.assertRaisesRegex(ValueError, "Missing VDI calculation step"):
+            render_general_report(result)
+
+    def test_markdown_escapes_user_text_without_injecting_rows_or_headings(self):
+        payload = default_input_json()
+        payload["title"] = "Design | A\n## Fake <script>*bold*</script>"
+        payload["plates"][0]["name"] = "plate | [link](x)"
+        payload["provenance"]["bolt.d"] = "manual:a|b"
+        _, text = report_for(payload)
+        self.assertIn(r"Design \| A<br>\#\# Fake &lt;script&gt;\*bold\*&lt;/script&gt;", text)
+        self.assertIn(r"plate \| \[link\](x)", text)
+        self.assertNotIn("\n## Fake", text)
+        self.assertNotIn("<script>", text)
+
+    def test_non_applicable_checks_are_explained_in_their_steps(self):
+        payload = default_input_json()
+        payload["load"]["axial_max"] = payload["load"]["axial_min"] = 0
+        result, text = report_for(payload)
+        r9 = text.split("### R9 —", 1)[1].split("### R10", 1)[0]
+        r11 = text.split("### R11 —", 1)[1].split("### R12", 1)[0]
+        r12 = text.split("### R12 —", 1)[1].split("### R13", 1)[0]
+        self.assertIn("无交变轴向载荷", r9)
+        self.assertIn("mges: 不适用", r11)
+        self.assertIn("SG: 不适用", r12)
+        self.assertIn("SA: 不适用", r12)
 
     def test_irrelevant_fields_are_omitted(self) -> None:
         _, dsv = report_for(default_input_json())

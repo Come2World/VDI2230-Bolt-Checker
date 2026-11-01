@@ -92,7 +92,8 @@ class TranslationTests(unittest.TestCase):
         outcome = self.calculate_form(payload, "en")
         self.assertTrue(outcome.ok, outcome.error)
         assert outcome.result is not None
-        self.assertIn(payload["title"], outcome.report)
+        self.assertIn("项目标题不翻译 &lt;script&gt;", outcome.report)
+        self.assertNotIn("<script>", outcome.report)
         self.assertIn("用户板层", outcome.report)
         self.assertIn("manual:用户确认", outcome.report)
         shapes = general_section_shapes(outcome.result.input, outcome.result.metrics, 640, 560, language="en")

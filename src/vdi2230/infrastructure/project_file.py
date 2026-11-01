@@ -1,7 +1,11 @@
 import json
+import os
 from pathlib import Path
+import tempfile
 from typing import Any
 
+from vdi2230 import __version__
+from vdi2230.domain.general_inputs import GeneralInput, parse_general_input
 from vdi2230.domain.models import ProjectSnapshot
 
 
@@ -21,11 +25,40 @@ def save_project(path: Path, project: ProjectSnapshot) -> None:
         "assumptions": list(project.assumptions),
         "metadata": project.metadata,
     }
-    path.write_text(
-        json.dumps(document, ensure_ascii=False, indent=2, allow_nan=False)
-        + "\n",
-        encoding="utf-8",
-    )
+    write_text_atomic(path, json.dumps(document, ensure_ascii=False, indent=2, allow_nan=False) + "\n")
+
+
+def write_text_atomic(path: Path, text: str) -> None:
+    """Replace only after a complete write, preserving existing files on failure."""
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                         prefix=f".{path.name}.", suffix=".tmp", delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(path)
+    finally:
+        if temporary is not None and temporary.exists():
+            temporary.unlink()
+
+
+def save_general_project(path: Path, item: GeneralInput) -> None:
+    save_project(path, ProjectSnapshot(
+        case_id="GENERAL", title=item.title, inputs=item.to_json(),
+        metadata={"application_version": __version__},
+    ))
+
+
+def load_general_project(path: Path) -> GeneralInput:
+    project = load_project(path)
+    if project.case_id != "GENERAL":
+        raise ValueError("This file is not a general bolt-joint project")
+    item = parse_general_input(project.inputs)
+    if item.title != project.title:
+        raise ValueError("Project title does not match the input title")
+    return item
 
 
 def load_project(path: Path) -> ProjectSnapshot:

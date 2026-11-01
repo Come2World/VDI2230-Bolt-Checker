@@ -1,4 +1,4 @@
-"""Plain-text report for the general VDI 2230 calculation."""
+"""Markdown report for the general VDI 2230 calculation, ordered R1–R13."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -7,7 +7,7 @@ from functools import partial
 from vdi2230 import __version__
 from vdi2230.calculations.general import GeneralCalculationResult
 from vdi2230.domain.general_inputs import FIELD_SPECS, LAYER_SPECS, FieldSpec, GeneralInput
-from vdi2230.domain.models import ResultStatus
+from vdi2230.domain.models import CalculationValue
 from vdi2230.infrastructure.report import DISCLAIMER
 from vdi2230.i18n import Language, format_text, language_code, source_label, translate
 
@@ -18,8 +18,24 @@ GROUP_TITLES = (
     ("load", "载荷"),
     ("assembly", "装配与校核要求"),
 )
-RULE = "=" * 72
-THIN_RULE = "-" * 72
+STEP_TITLES = (
+    "确定拧紧系数", "确定所需最小夹紧力", "确定柔度和载荷系数",
+    "确定预紧力损失", "确定最小装配预紧力", "确定最大装配预紧力",
+    "装配强度校核", "工作强度校核", "疲劳强度校核",
+    "支承面压校核", "最小旋合长度校核", "抗滑移和抗剪校核", "确定拧紧力矩",
+)
+
+
+def _md(text: str) -> str:
+    """Keep user text and formula punctuation from altering Markdown structure."""
+    text = text.replace("\\", "\\\\").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    for character in ("|", "`", "*", "_", "[", "]", "#"):
+        text = text.replace(character, "\\" + character)
+    return text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br>")
+
+
+def _row(*cells: str) -> str:
+    return "| " + " | ".join(_md(cell) for cell in cells) + " |"
 
 
 def _number(value: float | None) -> str:
@@ -90,46 +106,42 @@ def render_general_report(
     item = result.input
     timestamp = calculated_at or datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     lines = [
-        t("VDI 2230 螺栓连接计算报告（通用同心单螺栓）"),
-        RULE,
-        f"{t('项目标题')}{colon}{item.title}",
-        f"{t('软件版本')}{colon}{__version__}",
-        f"{t('计算时间（UTC）')}{colon}{timestamp}",
-        f"{t('计算模型')}{colon}{t(result.result.model_name)}",
-        f"{t('计算依据')}{colon}{t(result.result.source_reference)}",
-        f"{t('连接类型')}{colon}{t('通孔螺栓 + 螺母 (DSV)' if item.is_through_bolt else '螺纹孔连接 (ESV)')}",
-        f"{t('总体判定')}{colon}{t(result.verdict_label)}",
+        "# " + t("VDI 2230 螺栓连接计算报告（通用同心单螺栓）"),
+        "",
+        "- " + _md(f"{t('项目标题')}{colon}{item.title}"),
+        f"- {t('软件版本')}{colon}{__version__}",
+        f"- {t('计算时间（UTC）')}{colon}{timestamp}",
+        "- " + _md(f"{t('计算模型')}{colon}{t(result.result.model_name)}"),
+        "- " + _md(f"{t('计算依据')}{colon}{t(result.result.source_reference)}"),
+        f"- {t('连接类型')}{colon}{t('通孔螺栓 + 螺母 (DSV)' if item.is_through_bolt else '螺纹孔连接 (ESV)')}",
+        f"- {t('总体判定')}{colon}{t(result.verdict_label)}",
     ]
     if result.provisional_sources:
-        lines.append(t("注意：数据待核验——使用了未经核验的数据或模型假设，结果不得作为最终结论。"))
+        lines += ["", "> " + t("注意：数据待核验——使用了未经核验的数据或模型假设，结果不得作为最终结论。")]
 
-    lines += ["", t("一、安全系数与校核"), THIN_RULE]
-    label_width = max([22, *(len(t(check.label)) + 2 for check in result.checks)])
-    lines.append(f"{t('符号'):<8}{t('校核项'):<{label_width}}{t('计算值'):>14}{t('要求值'):>12}  {t('状态')}")
+    lines += ["", "## " + t("一、安全系数与校核"), "",
+              _row(*(t(label) for label in ("符号", "校核项", "计算值", "要求值", "状态", "依据", "说明"))),
+              "| --- | --- | --- | --- | --- | --- | --- |"]
     for check in result.checks:
         unit = f" {check.unit}" if check.unit else ""
         value = _number(check.value) + unit if check.value is not None else "—"
         required = _number(check.required) + unit if check.required is not None else "—"
-        left, right = ("（", "）") if language == "zh" else ("(", ")")
-        note = (
-            f"  {left}{t(check.note)}{right}"
-            if check.note and check.status in (ResultStatus.NOT_APPLICABLE, ResultStatus.NEEDS_REVIEW) else ""
-        )
-        lines.append(f"{check.symbol:<8}{t(check.label):<{label_width}}{value:>14}{required:>12}  {t(check.status.value)} · {t(check.reference)}{note}")
+        lines.append(_row(check.symbol, t(check.label), value, required, t(check.status.value),
+                          t(check.reference), t(check.note)))
 
-    lines += ["", t("二、输入参数"), THIN_RULE]
+    lines += ["", "## " + t("二、输入参数")]
     for group, title in GROUP_TITLES:
-        lines.append(f"[{t(title)}]")
+        lines += ["", f"### {t(title)}", ""]
         for spec in FIELD_SPECS:
             if spec.group != group or not _relevant(item, spec.path):
                 continue
             value = _input_value(item, spec.path)
             unit = f" {spec.unit}" if spec.unit and value is not None else ""
             prefix = {"head_washer": t("头侧垫片") + " · ", "nut_washer": t("螺母侧垫片") + " · "}.get(spec.path.split(".")[0], "")
-            lines.append(f"  {prefix}{t(spec.label)} = {_field_value(spec, value, language)}{unit}{_source(item, spec.path, language)}")
+            lines.append("- " + _md(f"{prefix}{t(spec.label)} = {_field_value(spec, value, language)}{unit}{_source(item, spec.path, language)}"))
         if group == "plates":
-            lines.append("  " + format_text("板层（自螺栓头侧起，共 {count} 层，Σh = {length} mm；含垫片 lK = {grip} mm）：", language,
-                                          count=len(item.plates), length=_number(item.plate_length), grip=_number(item.clamp_length)))
+            lines += ["", format_text("板层（自螺栓头侧起，共 {count} 层，Σh = {length} mm；含垫片 lK = {grip} mm）：", language,
+                                     count=len(item.plates), length=_number(item.plate_length), grip=_number(item.clamp_length)), ""]
             for index, layer in enumerate(item.plates):
                 parts = []
                 for spec in LAYER_SPECS:
@@ -139,33 +151,51 @@ def render_general_report(
                     rendered = _field_value(spec, value, language) if value is not None else t("自定义")
                     unit = f" {spec.unit}" if spec.unit and value is not None else ""
                     parts.append(f"{t(spec.label)} {rendered}{unit}")
-                lines.append(f"    {index + 1}. {layer.name}{colon}" + ("；" if language == "zh" else "; ").join(parts))
+                lines.append(f"{index + 1}. " + _md(f"{layer.name}{colon}" + ("；" if language == "zh" else "; ").join(parts)))
                 for spec in LAYER_SPECS:
                     path = f"plates[{index}].{spec.name}"
                     if path in item.provenance:
-                        lines.append(f"       {t(spec.label)} {t('来源')}{_source(item, path, language)}")
+                        lines.append(" " * (len(str(index + 1)) + 2) + "- " +
+                                     _md(f"{t(spec.label)} {t('来源')}{_source(item, path, language)}"))
         if group == "bolt" and not item.is_through_bolt:
             geometry = item.tapped_geometry
             dimensions = f"H = {_number(geometry.thickness)}, Lh = {_number(geometry.hole_depth)}, Lt = {_number(geometry.thread_depth)}, mvorh = {_number(geometry.engagement_length)} mm"
-            lines.append(f"  {t('ESV 解析几何（留空尺寸为估算）')}{colon}{dimensions}")
-            lines.append("  " + t("盲孔 Lh 含 118° 钻尖；通孔 Lh = H；实际旋合取内外螺纹重叠并受 mges 限制，红色段与 R11 一致。"))
+            lines.append("- " + _md(f"{t('ESV 解析几何（留空尺寸为估算）')}{colon}{dimensions}"))
+            lines.append("- " + t("盲孔 Lh 含 118° 钻尖；通孔 Lh = H；实际旋合取内外螺纹重叠并受 mges 限制，红色段与 R11 一致。"))
 
-    lines += ["", t("三、计算过程与全部结果"), THIN_RULE]
+    lines += ["", "## " + t("三、计算过程与全部结果")]
+    steps: dict[int, list[CalculationValue]] = {step: [] for step in range(1, 14)}
     for value in result.result.values:
-        unit = f" {value.unit}" if value.unit else ""
-        number = value.value if isinstance(value.value, (int, float)) else None
-        lines.append(f"{value.symbol} ({t(value.label)}) = {_number(number)}{unit} | {t('依据')}{colon}{t(value.formula_reference)}")
-        if value.note:
-            lines.append(f"  {t('说明')}{colon}{t(value.note)}")
+        if value.calculation_step is None or value.calculation_step not in steps:
+            raise ValueError(f"Missing VDI calculation step for {value.symbol}")
+        steps[value.calculation_step].append(value)
+    for step, title in enumerate(STEP_TITLES, 1):
+        lines += ["", f"### R{step} — {t(title)}", ""]
+        if step == 1:
+            lines.append(f"- {t('拧紧系数 αA')} = {_number(item.assembly.tightening_factor)}")
+            lines.append("- " + t("拧紧系数由用户按装配工艺确定；本程序不自动选择螺栓直径。"))
+        if steps[step]:
+            lines += [_row(*(t(label) for label in ("符号", "数值", "名称", "依据", "说明"))),
+                      "| --- | --- | --- | --- | --- |"]
+        for value in steps[step]:
+            unit = f" {value.unit}" if value.unit else ""
+            number = _number(value.value) if isinstance(value.value, (int, float)) or value.value is None else value.value
+            lines.append(_row(value.symbol, number + unit, t(value.label), t(value.formula_reference), t(value.note)))
+        step_checks = [check for check in result.checks if check.reference == f"R{step}"]
+        if step_checks:
+            lines.append("")
+        for check in step_checks:
+            note = f" · {t(check.note)}" if check.note else ""
+            lines.append("- " + _md(f"{check.symbol}: {t(check.status.value)}{note}"))
 
-    lines += ["", t("四、待核验数据来源"), THIN_RULE]
-    lines.extend(f"- {source_label(source, language)}" for source in result.provisional_sources)
+    lines += ["", "## " + t("四、待核验数据来源"), ""]
+    lines.extend("- " + _md(source_label(source, language)) for source in result.provisional_sources)
     if not result.provisional_sources:
         lines.append("- " + t("无（使用用户输入或项目采信数据）"))
 
-    lines += ["", t("五、警告与假设"), THIN_RULE]
-    lines.extend(f"- {t(warning)}" for warning in result.warnings)
-    lines += [t(line) for line in [
+    lines += ["", "## " + t("五、警告与假设"), ""]
+    lines.extend("- " + _md(t(warning)) for warning in result.warnings)
+    lines += ["- " + _md(t(line[2:])) for line in [
         "- 适用范围：同心单螺栓，轴向载荷 + 横向载荷/扭矩；不含偏心、弯曲、温度影响和螺栓组分配。",
         "- R10 工作面压取 FVmax = FMzul − FZ；DSV 采用 w = 1，两侧锥体起始直径分别取螺栓头与螺母 dW。",
         "- dW 用于：R10 面压 Ap = π/4·(dW²−dha²)、变形锥起始直径及 βL = lP/dW、y = DA′/dW、R13 支承摩擦直径 DKm = (dW+dha)/2；头部对边 s、dk 和内六角尺寸仅用于剖面图。",
@@ -175,5 +205,5 @@ def render_general_report(
         "- 垫片有效环面：Deff = min(dW, Do, DA)，di,eff = max(di, dh, dha)；δW = t/(EW·Aeff)。不计载荷扩散；邻接板层按较大的 di/dh 孔径保守积分，锥长度不含垫片。",
         "- Sp,K / Sp,M 取对应板层与垫片校核的最小值；垫片分别检查两接触面。嵌入界面数覆盖包含垫片/板层界面；手动 fZ 必须自行包含垫片影响。",
     ]]
-    lines += ["", t(DISCLAIMER), ""]
+    lines += ["", "> " + _md(t(DISCLAIMER)), ""]
     return "\n".join(lines)

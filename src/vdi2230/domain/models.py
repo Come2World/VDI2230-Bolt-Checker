@@ -47,8 +47,15 @@ class CalculationValue:
     absolute_error: float | None = None
     absolute_tolerance: float | None = None
     note: str = ""
+    calculation_step: int | None = None
 
     def __post_init__(self) -> None:
+        if self.calculation_step is not None and (
+            isinstance(self.calculation_step, bool)
+            or not isinstance(self.calculation_step, int)
+            or not 1 <= self.calculation_step <= 13
+        ):
+            raise ValueError("Calculation step must be an integer from 1 to 13")
         if not self.symbol or not self.label:
             raise ValueError("Calculation symbol and label must not be empty")
         if isinstance(self.value, bool):

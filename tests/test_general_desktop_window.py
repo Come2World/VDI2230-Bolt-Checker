@@ -1,4 +1,5 @@
 from copy import deepcopy
+import json
 from io import StringIO
 import tempfile
 import tkinter as tk
@@ -209,7 +210,7 @@ class GeneralWindowTests(unittest.TestCase):
         self.assertIn("保留项目标题", window.report())
         self.assertIn("Bearing friction μK", window.report())
         with tempfile.TemporaryDirectory() as directory:
-            target = Path(directory) / "report-en.txt"
+            target = Path(directory) / "report-en.md"
             window.export_report(target)
             self.assertEqual(target.read_text(encoding="utf-8"), window.report())
         window.set_language("zh")
@@ -256,7 +257,8 @@ class GeneralWindowTests(unittest.TestCase):
         self.assertEqual(window.outcome.result.input.title, "General bolt joint")
         with mock.patch("vdi2230.ui.general_window.filedialog.asksaveasfilename", return_value="") as dialog:
             window.export_report()
-        self.assertEqual(dialog.call_args.kwargs["initialfile"], "VDI2230-General_bolt_joint.txt")
+        self.assertEqual(dialog.call_args.kwargs["initialfile"], "VDI2230-General_bolt_joint.md")
+        self.assertEqual(dialog.call_args.kwargs["defaultextension"], ".md")
 
     def test_values_filter_narrows_the_list(self):
         window = self.window
@@ -299,7 +301,7 @@ class GeneralWindowTests(unittest.TestCase):
         self.assertEqual(window.error_list.winfo_manager(), "pack")
         self.assertIn("板层 1 · 厚度 h", window.error_list.get(0))
         self.assertTrue(window.export_button.instate(["disabled"]))
-        self.assertIsNone(window.export_report(Path(tempfile.gettempdir()) / "never.txt"))
+        self.assertIsNone(window.export_report(Path(tempfile.gettempdir()) / "never.md"))
         self.assertEqual(self.tab_text("plates"), "板层 ✕")
         self.assertEqual(window._rows["plates[0].thickness"][2].cget("text"), "✕")
         self.assertTrue(window.canvas.find_withtag("plate-0"), "last valid section stays visible")
@@ -636,10 +638,185 @@ class GeneralWindowTests(unittest.TestCase):
 
     def test_export_writes_the_report(self):
         with tempfile.TemporaryDirectory() as folder:
-            target = Path(folder) / "report.txt"
+            target = Path(folder) / "report.md"
             self.assertEqual(self.window.export_report(target), target)
             self.assertEqual(target.read_text(encoding="utf-8"), self.window.report())
-        self.assertEqual(self.window.status_var.get(), "已导出 report.txt")
+        self.assertEqual(self.window.status_var.get(), "已导出 report.md")
+
+    def test_save_load_restores_full_inputs_widgets_and_recalculates(self):
+        window = self.window
+        window.set_language("en")
+        self.set_choice("joint.type", "ESV")
+        self.set_choice("bolt.head_type", "socket")
+        window._vars["head_washer.enabled"].set(True)
+        window._vars["tapped.thickness"].set("50")
+        window._vars["tapped.hole_depth"].set("40")
+        window._vars["tapped.thread_depth"].set("20")
+        window.title_var.set("Saved design")
+        window.add_layer()
+        window._vars["plates[1].thickness"].set("5")
+        before = window.calculate_now()
+        self.assertTrue(before.ok, before.field_errors)
+        inputs = before.result.input.to_json()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "design.json"
+            self.assertEqual(window.save_project(path), path)
+            window._vars["plates[1].thickness"].set("6")
+            with mock.patch("vdi2230.ui.general_window.messagebox.askyesnocancel", return_value=False) as prompt:
+                self.assertEqual(window.load_project(path), path)
+            prompt.assert_called_once()
+            self.assertEqual(window.model.to_input_json(), inputs)
+            self.assertEqual(window.model.selected, 0)
+            self.assertEqual(window._vars["tapped.thread_depth"].get(), "20")
+            self.assertEqual(window._vars["bolt.head_diameter"].get(), "18")
+            self.assertEqual(window._vars["plates[0].name"].get(), "clamped plate 1")
+            window.select_layer(1)
+            self.assertEqual(window._vars["plates[1].thickness"].get(), "5")
+            self.assertFalse(window.is_field_visible("nut.height"))
+            self.assertTrue(window.is_field_visible("tapped.hole_depth"))
+            self.assertTrue(window.outcome.ok)
+            self.assertEqual(window.outcome.result.result.values, before.result.result.values)
+            self.assertEqual(window.outcome.result.checks, before.result.checks)
+            self.assertFalse(window.canvas.find_withtag("stale"))
+            self.assertEqual(window.project_path, path)
+            self.assertEqual(window.status_var.get(), "Loaded design.json")
+            self.assertTrue(window.report().startswith("# VDI"))
+
+    def test_save_button_uses_json_and_cancel_keeps_project(self):
+        window = self.window
+        with mock.patch("vdi2230.ui.general_window.filedialog.asksaveasfilename", return_value="") as dialog:
+            window.save_button.invoke()
+        self.assertEqual(dialog.call_args.kwargs["defaultextension"], ".json")
+        self.assertIsNone(window.project_path)
+        with mock.patch("vdi2230.ui.general_window.filedialog.askopenfilename", return_value="") as dialog:
+            window.load_button.invoke()
+        self.assertIn("*.json", str(dialog.call_args.kwargs["filetypes"]))
+        self.assertIsNone(window.project_path)
+
+    def test_save_invalid_input_or_io_failure_never_claims_success(self):
+        window = self.window
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "project.json"
+            path.write_text("original", encoding="utf-8")
+            window._vars["bolt.d"].set("invalid")
+            with mock.patch("vdi2230.ui.general_window.messagebox.showerror") as error:
+                self.assertIsNone(window.save_project(path))
+            error.assert_called_once()
+            self.assertEqual(path.read_text(encoding="utf-8"), "original")
+            self.assertIsNone(window.project_path)
+            window._vars["bolt.d"].set("12")
+            with mock.patch("vdi2230.ui.general_window.save_general_project", side_effect=OSError("permission denied")), \
+                    mock.patch("vdi2230.ui.general_window.messagebox.showerror") as error:
+                self.assertIsNone(window.save_project(path))
+            self.assertIn("permission denied", error.call_args.args[1])
+            self.assertIsNone(window.project_path)
+
+    def test_corrupt_or_uncalculable_load_keeps_current_project_and_pending_edits(self):
+        window = self.window
+        window._vars["plates[0].thickness"].set("21")
+        inputs = window.model.to_input_json()
+        job = window._calc_job
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "project.json"
+            path.write_text("{broken", encoding="utf-8")
+            with mock.patch("vdi2230.ui.general_window.messagebox.showerror") as error:
+                self.assertIsNone(window.load_project(path))
+            error.assert_called_once()
+            self.assertEqual(window.model.to_input_json(), inputs)
+            self.assertEqual(window._calc_job, job)
+            self.assertIsNone(window.project_path)
+            window.save_project(path)
+            document = json.loads(path.read_text(encoding="utf-8"))
+            document["inputs"]["bolt"]["length"] = 1
+            path.write_text(json.dumps(document), encoding="utf-8")
+            with mock.patch("vdi2230.ui.general_window.messagebox.showerror") as error:
+                self.assertIsNone(window.load_project(path))
+            error.assert_called_once()
+            self.assertEqual(window.model.to_input_json(), inputs)
+            document["inputs"]["bolt"]["length"] = 70
+            document["inputs"]["plates"][0]["roughness_rz"] = 200
+            path.write_text(json.dumps(document), encoding="utf-8")
+            with mock.patch("vdi2230.ui.general_window.messagebox.showerror") as error:
+                self.assertIsNone(window.load_project(path))
+            error.assert_called_once()
+            self.assertEqual(window.model.to_input_json(), inputs)
+
+    def test_failed_safety_checks_do_not_prevent_saving_and_loading(self):
+        window = self.window
+        window._vars["load.axial_max"].set("100000")
+        before = window.calculate_now()
+        self.assertTrue(before.ok)
+        self.assertEqual(before.result.verdict.value, "不通过")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "failed-design.json"
+            self.assertEqual(window.save_project(path), path)
+            with mock.patch("vdi2230.ui.general_window.messagebox.askyesnocancel") as prompt:
+                self.assertEqual(window.load_project(path), path)
+            prompt.assert_not_called()
+            self.assertEqual(window.outcome.result.checks, before.result.checks)
+            self.assertEqual(window.outcome.result.verdict.value, "不通过")
+
+    def test_unsaved_load_cancel_and_save_first_paths(self):
+        window = self.window
+        with tempfile.TemporaryDirectory() as directory:
+            old = Path(directory) / "old.json"
+            new = Path(directory) / "new.json"
+            window.save_project(old)
+            window._vars["bolt.bearing_friction"].set("0.10")
+            edited = window.model.to_input_json()
+            with mock.patch("vdi2230.ui.general_window.messagebox.askyesnocancel", return_value=None):
+                self.assertIsNone(window.load_project(old))
+            self.assertEqual(window.model.to_input_json(), edited)
+            with mock.patch("vdi2230.ui.general_window.messagebox.askyesnocancel", return_value=True), \
+                    mock.patch("vdi2230.ui.general_window.filedialog.asksaveasfilename", return_value=""):
+                self.assertIsNone(window.load_project(old))
+            self.assertEqual(window.model.to_input_json(), edited)
+            with mock.patch("vdi2230.ui.general_window.messagebox.askyesnocancel", return_value=True), \
+                    mock.patch("vdi2230.ui.general_window.filedialog.asksaveasfilename", return_value=str(new)):
+                self.assertEqual(window.load_project(old), old)
+            self.assertEqual(json.loads(new.read_text(encoding="utf-8"))["inputs"]["bolt"]["bearing_friction"], 0.10)
+            self.assertEqual(window._vars["bolt.bearing_friction"].get(), "0.12")
+
+    def test_save_first_to_the_loaded_path_loads_the_new_file_not_cached_inputs(self):
+        window = self.window
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "project.json"
+            window.save_project(path)
+            window._vars["bolt.bearing_friction"].set("0.10")
+            with mock.patch("vdi2230.ui.general_window.messagebox.askyesnocancel", return_value=True), \
+                    mock.patch("vdi2230.ui.general_window.filedialog.asksaveasfilename", return_value=str(path)):
+                self.assertEqual(window.load_project(path), path)
+            self.assertEqual(window._vars["bolt.bearing_friction"].get(), "0.1")
+            self.assertEqual(window._saved_inputs, window.model.to_input_json())
+
+    def test_close_guard_and_language_rebuilt_project_buttons(self):
+        window = self.window
+        for language, save, load in (("en", "Save project", "Load project"), ("zh", "保存项目", "加载项目")):
+            window.set_language(language)
+            self.assertEqual(window.save_button.cget("text"), save)
+            self.assertEqual(window.load_button.cget("text"), load)
+        window._vars["bolt.bearing_friction"].set("0.10")
+        with mock.patch.object(window, "close") as close, \
+                mock.patch("vdi2230.ui.general_window.messagebox.askyesnocancel", return_value=None):
+            window.request_close()
+            close.assert_not_called()
+        with mock.patch.object(window, "close") as close, \
+                mock.patch("vdi2230.ui.general_window.messagebox.askyesnocancel", return_value=False):
+            window.request_close()
+            close.assert_called_once()
+
+    def test_export_pending_edit_recalculates_and_reports_write_failure(self):
+        window = self.window
+        window._vars["bolt.bearing_friction"].set("0.10")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "report.md"
+            self.assertEqual(window.export_report(path), path)
+            self.assertIn("支承摩擦 μK = 0.1", path.read_text(encoding="utf-8"))
+            self.assertIsNone(window._calc_job)
+            with mock.patch("vdi2230.ui.general_window.write_text_atomic", side_effect=OSError("disk full")), \
+                    mock.patch("vdi2230.ui.general_window.messagebox.showerror") as error:
+                self.assertIsNone(window.export_report(path))
+            error.assert_called_once()
 
     def test_only_the_general_calculator_is_exposed_in_both_languages(self):
         self.assertFalse(hasattr(self.window, "open_reference"))

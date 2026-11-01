@@ -94,6 +94,7 @@ class GeneralCalculationResult:
 class _Values:
     def __init__(self) -> None:
         self.values: list[CalculationValue] = []
+        self.step = 3
 
     def add(
         self,
@@ -103,6 +104,8 @@ class _Values:
         unit: str,
         formula: str,
         note: str = "",
+        *,
+        step: int | None = None,
     ) -> float:
         if not math.isfinite(value):
             raise ValueError(f"{symbol} 计算结果非有限值")
@@ -113,6 +116,7 @@ class _Values:
             unit=unit,
             formula_reference=f"{STANDARD}, {formula}",
             note=note,
+            calculation_step=self.step if step is None else step,
         ))
         return value
 
@@ -316,7 +320,7 @@ def calculate_general(item: GeneralInput) -> GeneralCalculationResult:
     else:
         engagement = item.tapped_geometry.engagement_length
     v.add("mvorh", "现有旋合长度", max(engagement, 0.0), "mm",
-          "DSV: min(m, l − lK); ESV: min(l − lK, Lt) − max(0, l − b − lK)，再受 mges 限制")
+          "DSV: min(m, l − lK); ESV: min(l − lK, Lt) − max(0, l − b − lK)，再受 mges 限制", step=11)
 
     # R3 compliances
     area_nominal = area_circle(d)
@@ -385,6 +389,7 @@ def calculate_general(item: GeneralInput) -> GeneralCalculationResult:
     phi = v.add("Φn", "载荷系数", n * phi_k, "", "Φn = n·ΦK")
 
     # R4 embedding
+    v.step = 4
     shear_load = load.transverse > 0 or load.torque > 0
     if item.embedding.mode == "table":
         fz_um = _table_embedding(item, shear_load)
@@ -396,6 +401,7 @@ def calculate_general(item: GeneralInput) -> GeneralCalculationResult:
     fz_force = v.add("FZ", "嵌入预紧力损失", fz_mm / (delta_s + delta_p), "N", "R4: FZ = fZ/(δS+δP)")
 
     # R2 required clamp load
+    v.step = 2
     interfaces = layers[:-1] if dsv else layers
     if not interfaces:
         interfaces = layers
@@ -413,10 +419,13 @@ def calculate_general(item: GeneralInput) -> GeneralCalculationResult:
     fkerf = v.add("FKerf", "所需最小夹紧力", max(fkq, fk_axial), "N", "R2/3: max(FKQerf, FKP + FKA)")
 
     # R5/R6 preload
+    v.step = 5
     fmmin = v.add("FMmin", "最小装配预紧力", fkerf + (1 - phi) * load.axial_max + fz_force, "N", "R5: FKerf + (1−Φn)FAmax + FZ")
+    v.step = 6
     fmmax = v.add("FMmax", "最大装配预紧力", assembly.tightening_factor * fmmin, "N", "R6: αA·FMmin")
 
     # R7 assembly stress
+    v.step = 7
     thread_diameter = (d2 + d3) / 2
     use_shank = l1 > 0 and area_shank < area_stress
     d0 = shank_d if use_shank else thread_diameter
@@ -439,6 +448,7 @@ def calculate_general(item: GeneralInput) -> GeneralCalculationResult:
         fmzul = v.add("FMzul", "许用装配预紧力", fmzul_calc, "N", "R7/1")
 
     # R8 working stress
+    v.step = 8
     fsa_max = v.add("FSAmax", "螺栓附加载荷", phi * load.axial_max, "N", "FSA = Φn·FAmax")
     fs_max = v.add("FSmax", "最大螺栓力", fmzul + fsa_max, "N", "R8/1: FMzul + Φn·FAmax")
     sigma_z = v.add("σz,max", "最大拉应力", fs_max / a0, "MPa", "R8/2")
@@ -450,6 +460,7 @@ def calculate_general(item: GeneralInput) -> GeneralCalculationResult:
     sf = v.add("SF", "抗屈服安全系数", bolt.yield_strength / sigma_red, "", "R8/5")
 
     # R9 fatigue
+    v.step = 9
     sigma_a = v.add("σa", "交变应力幅", phi * (load.axial_max - load.axial_min) / (2 * area_stress), "MPa", "R9/1")
     sigma_as: float | None = None
     if bolt.fatigue_strength_amplitude is not None:
@@ -479,15 +490,18 @@ def calculate_general(item: GeneralInput) -> GeneralCalculationResult:
             warnings.append("d > 40 mm：R9/5 疲劳极限参考值需另行确认。")
 
     # R10 surface pressure
+    v.step = 10
     fv_max = fmzul - fz_force
     bearing_force = max(fmzul, fv_max + fsa_max)
     sp_head = _bearing_check(item, "head", bearing_force, v)
     sp_nut = _bearing_check(item, "nut", bearing_force, v) if dsv else None
 
     # R11 engagement
+    v.step = 11
     engagement_check = _engagement_check(item, v, engagement, a0, provisional, warnings)
 
     # R12 residual clamp, slip and shear
+    v.step = 12
     fkr = v.add("FKRmin", "最小残余夹紧力", fmzul / assembly.tightening_factor - (1 - phi) * load.axial_max - fz_force, "N", "R12/1")
     sg = v.add("SG", "抗滑移安全系数", fkr / fkq, "", "R12/4") if fkq > 0 else None
     sa = None
@@ -510,6 +524,7 @@ def calculate_general(item: GeneralInput) -> GeneralCalculationResult:
         sa = v.add("SA", "抗剪安全系数", tau_b * shear_area / load.transverse, "", "R12/7")
 
     # R13 tightening torque
+    v.step = 13
     side = assembly.tighten_side
     bearing_d = nut.bearing_diameter if side == "nut" else bolt.head_bearing_diameter
     washer = item.washer_at(side)
@@ -529,7 +544,7 @@ def calculate_general(item: GeneralInput) -> GeneralCalculationResult:
         warnings.append(note)
         checks.append(SafetyCheck("SD", "疲劳安全系数", None, req.SD, "", ResultStatus.NEEDS_REVIEW, "R9", note))
     elif sigma_a > 0 and sigma_as is not None:
-        sd = v.add("SD", "疲劳安全系数", sigma_as / sigma_a, "", "R9/4")
+        sd = v.add("SD", "疲劳安全系数", sigma_as / sigma_a, "", "R9/4", step=9)
         checks.append(SafetyCheck("SD", "疲劳安全系数", sd, req.SD, "", _status(sd, req.SD), "R9"))
     else:
         checks.append(SafetyCheck("SD", "疲劳安全系数", None, req.SD, "", ResultStatus.NOT_APPLICABLE, "R9", "无交变轴向载荷"))
