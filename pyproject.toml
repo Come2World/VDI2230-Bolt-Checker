@@ -4,21 +4,17 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vdi2230-bolt-calculator"
-version = "0.1.0"
-description = "Local VDI 2230 Part 1 bolt-joint calculation assistant"
+version = "0.0.1"
+description = "Local Tk desktop VDI 2230 Part 1 bolt-joint calculation assistant"
 requires-python = ">=3.10"
 dependencies = []
 
-[project.optional-dependencies]
-ui-test = ["playwright>=1.40"]
-
 [project.scripts]
 vdi2230 = "vdi2230.__main__:main"
-vdi2230-web = "vdi2230.web.server:main"
 
 [tool.setuptools.package-data]
-"vdi2230.web" = ["static/*.html", "static/*.css", "static/*.js"]
 "vdi2230.data" = ["*.json", "bolt_catalog/*.json", "bolt_catalog/*.md", "bolt_catalog/licenses/*.txt"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+namespaces = false

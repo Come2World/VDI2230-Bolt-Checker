@@ -2,12 +2,10 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Mapping
 
 from vdi2230.domain.models import (
     CalculationResult,
     CalculationValue,
-    JsonValue,
     ProjectSnapshot,
     ResultStatus,
 )
@@ -24,13 +22,6 @@ from vdi2230.infrastructure.project_file import (
     save_project,
 )
 from vdi2230.infrastructure.report import render_text_report
-from vdi2230.domain.section import SectionGeometry
-from vdi2230.ui.forms import InputFieldSpec, parse_form_values
-from vdi2230.ui.main_window import CaseFormDefinition
-from vdi2230.ui.main_window import (
-    format_result_details,
-    format_result_value,
-)
 
 
 class DomainFoundationTests(unittest.TestCase):
@@ -193,34 +184,6 @@ class DomainFoundationTests(unittest.TestCase):
                 relative_error_percent=1,
             )
 
-    def test_ui_result_format_shows_pdf_reference_and_error(self):
-        relative = CalculationValue(
-            symbol="SF",
-            label="yield safety factor",
-            value=1.15,
-            unit="",
-            formula_reference="B1 R8",
-            reference_value=1.12,
-            relative_error_percent=2.68,
-        )
-        absolute = CalculationValue(
-            symbol="FA",
-            label="load",
-            value=0.004,
-            unit="N",
-            formula_reference="B1 R1",
-            reference_value=0,
-            absolute_error=0.004,
-            absolute_tolerance=0.005,
-        )
-        self.assertIn("PDF=1.12", format_result_value(relative))
-        self.assertIn("误差=2.68%", format_result_value(relative))
-        self.assertIn("绝对误差=0.004", format_result_value(absolute))
-        self.assertIn("容差=0.005", format_result_value(absolute))
-        details = format_result_details(relative)
-        self.assertIn("yield safety factor", details)
-        self.assertIn("依据：B1 R8", details)
-
     def test_overall_status_never_hides_a_failed_check(self):
         result = CalculationResult(
             case_id="B1",
@@ -247,54 +210,6 @@ class DomainFoundationTests(unittest.TestCase):
         )
         self.assertEqual(result.overall_status, ResultStatus.FAIL)
         self.assertFalse(result.is_fully_calculated)
-
-    def test_form_parser_rejects_non_finite_and_invalid_choices(self):
-        fields = (
-            InputFieldSpec("length", "夹紧长度", "mm"),
-            InputFieldSpec(
-                "method",
-                "拧紧方法",
-                kind="choice",
-                choices=("torque", "angle"),
-            ),
-        )
-        self.assertEqual(
-            parse_form_values(fields, {"length": "42", "method": "torque"}),
-            {"length": 42.0, "method": "torque"},
-        )
-        with self.assertRaisesRegex(ValueError, "有限数值"):
-            parse_form_values(fields, {"length": "nan", "method": "torque"})
-        with self.assertRaisesRegex(ValueError, "有效选项"):
-            parse_form_values(fields, {"length": "42", "method": "bad"})
-
-    def test_case_form_rejects_duplicate_field_keys(self):
-        fields = (
-            InputFieldSpec("length", "夹紧长度", "mm"),
-            InputFieldSpec("length", "另一长度", "mm"),
-        )
-
-        def calculate(_project: ProjectSnapshot) -> CalculationResult:
-            return CalculationResult(
-                case_id="B1",
-                model_name="B1",
-                source_reference="test",
-                values=(),
-            )
-
-        def geometry(
-            _inputs: Mapping[str, JsonValue],
-        ) -> SectionGeometry | None:
-            return None
-
-        with self.assertRaisesRegex(ValueError, "Duplicate input field"):
-            CaseFormDefinition(
-                case_id="B1",
-                title="B1",
-                fields=fields,
-                calculate=calculate,
-                geometry=geometry,
-            )
-
 
 if __name__ == "__main__":
     unittest.main()

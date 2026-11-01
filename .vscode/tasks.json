@@ -2,41 +2,21 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "VDI 2230: Web UI",
+      "label": "VDI 2230: Tk UI",
       "type": "process",
       "command": "${command:python.interpreterPath}",
-      "args": ["-m", "vdi2230.web"],
+      "args": ["-m", "vdi2230"],
       "options": {
         "cwd": "${workspaceFolder}",
         "env": { "PYTHONPATH": "${workspaceFolder}/src" }
       },
-      "isBackground": true,
-      "problemMatcher": {
-        "pattern": { "regexp": "^(.+):(\\d+):\\s+(.*)$", "file": 1, "line": 2, "message": 3 },
-        "background": {
-          "activeOnStart": true,
-          "beginsPattern": "^VDI 2230",
-          "endsPattern": "^VDI 2230 web UI: http://"
-        }
-      }
-    },
-    {
-      "label": "VDI 2230: Unit and API tests",
-      "type": "process",
-      "command": "${command:python.interpreterPath}",
-      "args": ["-m", "unittest", "discover", "-s", "tests", "-v"],
-      "options": {
-        "cwd": "${workspaceFolder}",
-        "env": { "PYTHONPATH": "${workspaceFolder}/src" }
-      },
-      "group": "test",
       "problemMatcher": []
     },
     {
-      "label": "VDI 2230: Browser UI tests",
+      "label": "VDI 2230: All tests",
       "type": "process",
       "command": "${command:python.interpreterPath}",
-      "args": ["-m", "unittest", "discover", "-s", "tests/browser", "-v"],
+      "args": ["-m", "unittest", "discover", "-s", "tests", "-v"],
       "options": {
         "cwd": "${workspaceFolder}",
         "env": { "PYTHONPATH": "${workspaceFolder}/src" }

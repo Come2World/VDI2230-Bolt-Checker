@@ -1,8 +1,8 @@
 """Toolkit-neutral 2D section drawing of a general single-bolt joint.
 
-Shapes are laid out in pixel coordinates for a given view size so the web
-(SVG) and desktop (Tk canvas) front ends render identical drawings. Roles tag
-shapes for interaction, e.g. ``plate-0`` selects the first clamped layer.
+Shapes are laid out in pixel coordinates for a given Tk canvas size.
+Roles tag shapes for interaction, e.g. ``plate-0`` selects the first
+clamped layer. Geometry can be tested without creating a window.
 """
 from __future__ import annotations
 

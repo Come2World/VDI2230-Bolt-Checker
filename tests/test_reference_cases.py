@@ -148,6 +148,27 @@ CALCULATORS = {
 }
 
 class ReferenceCaseTests(unittest.TestCase):
+    def test_all_twelve_safety_factors_individually_stay_within_three_percent(self):
+        factors = {
+            "B1": ("SF", "Sp"),
+            "B2": ("SG",),
+            "B3": ("Sp", "SG"),
+            "B4": ("SD", "SpK", "SpMu", "SG"),
+            "B5": ("SF", "SD", "Sp"),
+        }
+        self.assertEqual(sum(len(symbols) for symbols in factors.values()), 12)
+        for case_id, symbols in factors.items():
+            values = {value.symbol: value for value in CALCULATORS[case_id]().values}
+            for symbol in symbols:
+                with self.subTest(case=case_id, safety_factor=symbol):
+                    value = values[symbol]
+                    expected = EXPECTED[case_id][symbol]
+                    self.assertEqual(value.reference_value, expected)
+                    self.assertIsNotNone(value.value)
+                    assert value.value is not None
+                    error = abs(value.value - expected) / abs(expected) * 100
+                    self.assertLessEqual(error, 3.0, f"{case_id}.{symbol}: {error:.6f}%")
+
     def test_all_printed_reference_quantities(self) -> None:
         for case_id, calculate in CALCULATORS.items():
             with self.subTest(case=case_id):

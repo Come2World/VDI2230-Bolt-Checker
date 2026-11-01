@@ -1,7 +1,7 @@
 """Toolkit-neutral form state for the desktop general calculator.
 
-Mirrors the behaviour of ``web/static/app.js`` (catalog fill, material fill,
-layer editing, field visibility) so the Tk window only binds widgets. Nothing
+Manages catalog fill, material fill, layer editing and field visibility
+so the Tk window only binds widgets. Nothing
 here imports tkinter, which keeps the logic testable without a display.
 """
 from __future__ import annotations
@@ -46,7 +46,7 @@ _PLATE_ROLE = re.compile(r"^plate-(\d+)$")
 
 
 def fmt(value: Any) -> str:
-    """Compact display with four significant digits (same rule as the web UI)."""
+    """Compact display with four significant digits."""
     if value is None:
         return "—"
     if isinstance(value, bool) or not isinstance(value, (int, float)):

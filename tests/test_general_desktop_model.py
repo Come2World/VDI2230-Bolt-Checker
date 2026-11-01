@@ -1,6 +1,7 @@
 import math
 import unittest
 
+from vdi2230.domain.general_inputs import default_input_json
 from vdi2230.infrastructure.general_section import Shape
 from vdi2230.ui.general_model import (
     CATALOG_PATHS,
@@ -248,6 +249,31 @@ class GeneralFormModelTests(unittest.TestCase):
         self.assertFalse(outcome.ok)
         self.assertIn("输入有误", outcome.error)
         self.assertEqual([error.path for error in outcome.field_errors], ["plates[0].thickness"])
+
+    def test_geometry_and_load_validation_remains_structured_in_both_languages(self):
+        for joint in ("DSV", "ESV"):
+            for language in ("zh", "en"):
+                for section, name, invalid in (
+                    ("bolt", "length", 10), ("joint", "hole_diameter", 5),
+                    ("joint", "outer_diameter", 10), ("bolt", "bearing_friction", -1),
+                    ("load", "axial_min", 100000), ("head_washer", "outer_diameter", 10),
+                    ("plates", "thickness", 0), ("plates", "roughness_rz", 160),
+                ):
+                    with self.subTest(joint=joint, language=language, field=f"{section}.{name}"):
+                        item = default_input_json()
+                        item["joint"]["type"] = joint
+                        item["head_washer"]["enabled"] = True
+                        target = item["plates"][0] if section == "plates" else item[section]
+                        target[name] = invalid
+                        self.model.reset(item)
+                        outcome = self.model.calculate(language)
+                        self.assertFalse(outcome.ok)
+                        self.assertTrue(outcome.error)
+                        self.assertIsNone(outcome.result)
+                        self.assertEqual(outcome.report, "")
+                        if language == "en":
+                            messages = outcome.error + "".join(error.message for error in outcome.field_errors)
+                            self.assertNotRegex(messages, r"[\u4e00-\u9fff]")
 
     def test_catalog_paths_are_choice_fields(self):
         for path in CATALOG_PATHS:

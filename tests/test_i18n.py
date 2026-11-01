@@ -5,12 +5,18 @@ from string import Formatter
 import unittest
 
 from vdi2230.domain.general_inputs import FIELD_SPECS, LAYER_SPECS, default_input_json
-from vdi2230.i18n import MESSAGES, TEMPLATES, MissingTranslationError, format_text, source_label, translate
-from vdi2230.web.general_api import calculate_payload
+from vdi2230.i18n import MESSAGES, TEMPLATES, MissingTranslationError, format_text, language_code, source_label, translate
+from vdi2230.infrastructure.general_section import general_section_shapes, section_target
+from vdi2230.ui.general_model import GeneralFormModel
 from test_general_engine import b1_payload, b2_payload, b3_payload
 
 
 class TranslationTests(unittest.TestCase):
+    def calculate_form(self, payload, language="zh"):
+        model = GeneralFormModel()
+        model.reset(payload)
+        return model.calculate(language)
+
     def test_specific_validation_template_precedes_its_shorter_prefix(self):
         message = "须大于夹紧长度 lK = 92.88，留出旋合长度"
         self.assertEqual(translate(message, "en"), "Must exceed grip length lK = 92.88 to allow thread engagement")
@@ -48,64 +54,69 @@ class TranslationTests(unittest.TestCase):
                 plate["name"] = f"Part {index + 1}"
             original = deepcopy(payload)
             with self.subTest(type=payload["joint"]["type"], diameter=payload["bolt"]["d"]):
-                zh_status, zh = calculate_payload({"input": payload})
-                en_status, en = calculate_payload({"input": payload, "language": "en"})
-                self.assertEqual((zh_status, en_status), (200, 200))
+                zh = self.calculate_form(payload)
+                en = self.calculate_form(payload, "en")
+                self.assertTrue(zh.ok, zh.error)
+                self.assertTrue(en.ok, en.error)
+                assert zh.result is not None and en.result is not None
                 self.assertEqual(payload, original)
-                self.assertEqual(zh["input"], en["input"])
-                self.assertEqual(zh["metrics"], en["metrics"])
-                self.assertEqual(zh["verdict"], en["verdict"])
-                self.assertEqual(zh["provisional_sources"], en["provisional_sources"])
-                self.assertIn("计算报告", zh["report"])
-                self.assertIn("Calculation Report", en["report"])
-                self.assertIn("Warnings and assumptions", en["report"])
-                self.assertNotRegex(en["report"], r"[\u4e00-\u9fff]")
-                for first, second in zip(zh["values"], en["values"]):
-                    self.assertEqual((first["symbol"], first["value"], first["unit"]),
-                                     (second["symbol"], second["value"], second["unit"]))
-                    for key in ("label", "note", "formula_reference"):
-                        self.assertNotRegex(second[key], r"[\u4e00-\u9fff]")
-                for first, second in zip(zh["checks"], en["checks"]):
-                    for key in ("symbol", "value", "required", "unit", "status"):
-                        self.assertEqual(first[key], second[key])
-                    self.assertNotRegex(second["label"] + second["status_label"] + second["note"], r"[\u4e00-\u9fff]")
-                for first, second in zip(zh["section"]["shapes"], en["section"]["shapes"]):
-                    self.assertEqual(first["points"], second["points"])
-                    self.assertEqual(first["target"], second["target"])
-                    self.assertNotRegex(second["text"], r"[\u4e00-\u9fff]")
-                    self.assertEqual(first["text_by_language"]["en"], second["text"])
+                self.assertEqual(zh.result.input, en.result.input)
+                self.assertEqual(zh.result.metrics, en.result.metrics)
+                self.assertEqual(zh.result.verdict, en.result.verdict)
+                self.assertEqual(zh.result.provisional_sources, en.result.provisional_sources)
+                self.assertIn("计算报告", zh.report)
+                self.assertIn("Calculation Report", en.report)
+                self.assertIn("Warnings and assumptions", en.report)
+                self.assertNotRegex(en.report, r"[\u4e00-\u9fff]")
+                self.assertEqual(zh.result.result.values, en.result.result.values)
+                self.assertEqual(zh.result.checks, en.result.checks)
+                for value in en.result.result.values:
+                    for text in (value.label, value.note, value.formula_reference):
+                        self.assertNotRegex(translate(text, "en"), r"[\u4e00-\u9fff]")
+                for check in en.result.checks:
+                    for text in (check.label, check.status.value, check.note, check.reference):
+                        self.assertNotRegex(translate(text, "en"), r"[\u4e00-\u9fff]")
+                zh_shapes = general_section_shapes(zh.result.input, zh.result.metrics, 640, 560)
+                en_shapes = general_section_shapes(en.result.input, en.result.metrics, 640, 560, language="en")
+                self.assertEqual(len(zh_shapes), len(en_shapes))
+                for first, second in zip(zh_shapes, en_shapes):
+                    self.assertEqual(first.points, second.points)
+                    self.assertEqual(section_target(first.role), section_target(second.role))
+                    self.assertNotRegex(second.text, r"[\u4e00-\u9fff]")
 
     def test_free_text_survives_english_report_and_drawing(self):
         payload = default_input_json()
         payload["title"] = "项目标题不翻译 <script>"
         payload["plates"][0]["name"] = "用户板层"
         payload["provenance"]["bolt.d"] = "manual:用户确认"
-        status, result = calculate_payload({"input": payload, "language": "en"})
-        self.assertEqual(status, 200)
-        self.assertIn(payload["title"], result["report"])
-        self.assertIn("用户板层", result["report"])
-        self.assertIn("manual:用户确认", result["report"])
-        self.assertTrue(any("用户板层" in shape["text"] for shape in result["section"]["shapes"]))
+        outcome = self.calculate_form(payload, "en")
+        self.assertTrue(outcome.ok, outcome.error)
+        assert outcome.result is not None
+        self.assertIn(payload["title"], outcome.report)
+        self.assertIn("用户板层", outcome.report)
+        self.assertIn("manual:用户确认", outcome.report)
+        shapes = general_section_shapes(outcome.result.input, outcome.result.metrics, 640, 560, language="en")
+        self.assertTrue(any("用户板层" in shape.text for shape in shapes))
 
     def test_invalid_language_and_translated_field_errors(self):
         for language in ("fr", None, [], 1):
-            status, data = calculate_payload({"input": default_input_json(), "language": language})
-            self.assertEqual(status, 400)
-            self.assertIn("Unsupported language", data["error"])
+            with self.assertRaisesRegex(ValueError, "Unsupported language"):
+                language_code(language)
         for path, value in (("d", -1), ("bearing_friction", "abc"), ("thread_friction", 2)):
             payload = default_input_json()
             payload["bolt"][path] = value
-            status, data = calculate_payload({"input": payload, "language": "en"})
-            self.assertEqual(status, 400)
-            self.assertIn("Invalid input", data["error"])
-            self.assertTrue(data["field_errors"])
-            for error in data["field_errors"]:
-                self.assertNotRegex(error["message"], r"[\u4e00-\u9fff]")
+            outcome = self.calculate_form(payload, "en")
+            self.assertFalse(outcome.ok)
+            self.assertIn("Invalid input", outcome.error)
+            self.assertTrue(outcome.field_errors)
+            for error in outcome.field_errors:
+                self.assertNotRegex(error.message, r"[\u4e00-\u9fff]")
 
-    def test_parallel_clients_do_not_share_language_state(self):
+    def test_independent_form_models_do_not_share_language_state(self):
         def calculate(language):
-            _, data = calculate_payload({"input": default_input_json(), "language": language})
-            return language, bool(re.search(r"计算报告", data["report"]))
+            outcome = self.calculate_form(default_input_json(), language)
+            self.assertTrue(outcome.ok, outcome.error)
+            return language, bool(re.search(r"计算报告", outcome.report))
         with ThreadPoolExecutor(max_workers=4) as pool:
             for language, chinese in pool.map(calculate, ["zh", "en"] * 4):
                 self.assertEqual(chinese, language == "zh")

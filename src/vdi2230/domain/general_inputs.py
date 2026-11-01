@@ -1,7 +1,7 @@
 """Input model for the general concentric single-bolt calculation.
 
-One field schema drives validation, JSON round-tripping and the user
-interfaces (web and Tkinter), so labels, units and limits stay consistent.
+One field schema drives validation, JSON round-tripping and the Tkinter
+form model, so labels, units and limits stay consistent.
 """
 from __future__ import annotations
 

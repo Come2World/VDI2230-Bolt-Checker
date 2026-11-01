@@ -1,15 +1,17 @@
-# VDI 2230 Bolt Calculator
+# VDI 2230 Bolt Checker 0.0.1
 
-This local Python application (desktop and browser UI) has two modes:
+This local Python desktop application (Tkinter, standard library only) performs a
+parameterized VDI 2230 Part 1:2015 calculation for a concentric single-bolt joint:
+through bolt with nut (DSV) or tapped thread (ESV), 1–10 clamped layers,
+solid/hollow and reduced-shank bolts, concentric axial load, transverse load and
+torque. Inputs drive the calculation, the 2D section and the safety factors
+(FMzul, SF, SD, Sp, mges, FKR, SG, SA) live; the result is exported as a UTF-8
+text report.
 
-- **General calculator** (default): a parameterized VDI 2230 Part 1:2015
-  calculation for a concentric single-bolt joint — through bolt with nut (DSV)
-  or tapped thread (ESV), 1–10 clamped layers, solid/hollow and reduced-shank
-  bolts, concentric axial load, transverse load and torque. Inputs drive the
-  calculation, the 2D section and the safety factors (FMzul, SF, SD, Sp, mges,
-  FKR, SG, SA) live; the result is exported as a UTF-8 text report.
-- **Reference verifier**: recalculates the fixed Appendix B cases B1–B5 and
-  compares every safety factor with the printed values (all 12 within 3 %).
+Release 0.0.1 contains **only the Tk desktop UI**. The browser UI, its HTTP API
+and the separate B1–B5 reference-verifier window are not part of this release.
+The VDI 2230 Appendix B cases B1–B5 remain **internal automated regression
+tests** (see [Automated tests](#automated-tests)); they are not a user mode.
 
 Eccentric clamping/loading, bending, thermal effects and multi-bolt load
 distribution are outside the general model. Bundled bolt, material and table
@@ -31,14 +33,14 @@ ordered from the bolt head. Bolt data are chosen from the hex-bolt catalog
 (ISO 4014/4017, M6–M30, 8.8/10.9/12.9) first; any catalog value can be
 overridden, and the override is kept when the bolt length changes.
 
-Optional head-side and nut-side **plain washers** are edited on the **板层**
-tab. Nut-side washers apply only to DSV; their settings are retained but not
-used when switching to ESV. Both washers are off by default. Initial dimensions
-are empirical, not ISO catalog data: **di = 1.1d, Do = 2d, t = 0.16d** (mm;
-M12: 13.2 / 24 / 1.92). Unmodified estimates follow nominal-diameter changes;
-manual overrides remain unchanged. Material, modulus, limiting surface pressure
-and roughness are also editable. S355J0 is only the initial material selection,
-not a claim about the grade of any purchased washer.
+Optional head-side and nut-side **plain washers** are edited on the
+**Plates / 板层** tab. Nut-side washers apply only to DSV; their settings are
+retained but not used when switching to ESV. Both washers are off by default.
+Initial dimensions are empirical, not ISO catalog data: **di = 1.1d, Do = 2d,
+t = 0.16d** (mm; M12: 13.2 / 24 / 1.92). Unmodified estimates follow
+nominal-diameter changes; manual overrides remain unchanged. Material, modulus,
+limiting surface pressure and roughness are also editable. S355J0 is only the
+initial material selection, not a claim about the grade of any purchased washer.
 
 ### General-model assumptions
 
@@ -62,15 +64,16 @@ not a claim about the grade of any purchased washer.
 - Torque uses the rotating head/nut-to-washer contact annulus, not the full
   washer OD, and assumes the washer stays stationary. Washer bending and actual
   contact/load distribution are unverified; enabled washers retain a
-  **需确认** model flag even when all geometry is manually entered.
+  **review required / 需确认** model flag even when all geometry is manually
+  entered.
 
-Regression against the source (same inputs as B1–B3): B1 SF +0.45 %,
-Sp −0.18 %, MA +0.88 %; B2 SG +0.32 %, Sp −0.28 %, SA 0.00 %, MA +0.56 %;
-B3 SG/Sp/FMzul/MA 0.00 %. **B3 uses μG = 0.12 and μK = 0.10**, reproducing
-the source tightening torque of **521.135 N·m**. No shared-friction assumption
-or special torque correction is used. The fixed reference verifier is unchanged.
-The B1 Φ difference comes from the source mixing
-w = 1 geometry with δPzu = δM; B3 R11 in the source uses FMzul and 1.2·P.
+Regression of the general engine against the source (same inputs as B1–B3):
+B1 SF +0.45 %, Sp −0.18 %, MA +0.88 %; B2 SG +0.32 %, Sp −0.28 %, SA 0.00 %,
+MA +0.56 %; B3 SG/Sp/FMzul/MA 0.00 %. **B3 uses μG = 0.12 and μK = 0.10**,
+reproducing the source tightening torque of **521.135 N·m**. No shared-friction
+assumption or special torque correction is used. The B1 Φ difference comes
+from the source mixing w = 1 geometry with δPzu = δM; B3 R11 in the source uses
+FMzul and 1.2·P.
 
 ## Run from the repository root
 
@@ -78,165 +81,90 @@ w = 1 geometry with δPzu = δM; B3 R11 in the source uses FMzul and 1.2·P.
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install -e .
-vdi2230              # general calculator (Tkinter)
-vdi2230 --reference  # B1–B5 reference verifier
+vdi2230              # Tk desktop calculator
+vdi2230 --version    # prints "vdi2230 0.0.1" without opening a window
 ```
 
-Without installation: `PYTHONPATH=src python3 -m vdi2230 [--reference]`.
-The desktop window uses the same three-pane layout as the browser UI; the
-**参考算例 B1–B5** button opens the verifier in a second window.
+Without installation: `PYTHONPATH=src python3 -m vdi2230`.
+On Windows, activate with `.venv\Scripts\Activate.ps1`.
+After updating the code, close and restart any running window.
 
-### Browser UI
+### Desktop window
 
-```sh
-PYTHONPATH=src python3 -m vdi2230.web
-# Or, after installation:
-vdi2230-web
-```
+The window uses a compact three-pane layout with a dark cyberpunk palette
+(standard-library `clam` ttk theme). Pass/fail/review keep distinct
+green/red/amber colors and text labels.
 
-Open <http://127.0.0.1:8765> (general calculator) or
-<http://127.0.0.1:8765/reference> (B1–B5 verifier) in a browser or VS Code's
-integrated browser.
-Use `--port 8766` if the default port is busy; stop the server with Ctrl+C.
-The service binds only to the loopback interface, serves bundled local assets,
-and requires no external network access. This is a local UI/test server, not
-a production or shared-network service.
-
-The general page is a compact single-viewport layout (12 px text, 24 px
-controls; fits 1280×720 without page scrolling; stacks below 1080 px width):
-
-- **Cyberpunk theme** – deep navy surfaces, cyan input/geometry accents,
-  purple results accents, subtle neon panel borders and a drawing grid.
-  Pass/fail/review retain distinct green/red/amber colors and text labels.
-  Main text, muted text and status color pairs meet a 4.5:1 contrast threshold.
-- **Left** – inputs in four tabs (螺栓 / 板层 / 载荷 / 装配). Catalog and
+- **Left** – inputs in four tabs (Bolt / Plates / Loads / Assembly). Catalog and
   material values are marked (cyan = accepted catalog, amber = estimate/review);
   irrelevant fields (nut vs. tapped part, table vs. manual modes) are hidden.
-- **Center** – engineering-style SVG section: chamfered hex-head/nut profiles
-  with curved face projections, unhatched bolt, fine thread-root lines,
-  alternating plate/washer hatching, centerline and arrow dimensions
-  (d, layer thickness, lK, l, DA). Click a bolt, nut, washer or plate to activate
-  its input tab, reveal the relevant section and focus its field. The same
-  interaction is available on the Tk canvas. **+ 板层** inserts a copy below the
-  selected layer. The drawing remains schematic, not manufacturing-ready.
+- **Center** – engineering-style Canvas section: chamfered hex-head/nut
+  profiles, unhatched bolt, thread-root lines, alternating plate/washer
+  hatching, centerline and dimensions (d, layer thickness, lK, l, DA). Click a
+  bolt, nut, washer or plate to activate its input tab and focus its field.
+  **+ Plate** inserts a copy below the selected layer. Tk Canvas has no true
+  alpha compositing, so the compression cone is a transparent, unfilled dashed
+  outline that keeps the plates behind it visible. The drawing is schematic,
+  not manufacturing-ready.
 - **Right** – verdict, safety-factor table, filterable full results and the
-  text report with **导出 TXT**.
+  text report with **Export TXT**.
 
 Calculation runs automatically 300 ms after an edit. Invalid fields are
 listed and marked on their tab; the last valid section stays visible with a
-"剖面未更新" overlay and export is disabled until the input is fixed.
+"Section not updated" overlay and export is disabled until the input is fixed.
+If a thickness edit makes the clamped stack too long for the selected bolt,
+the input is invalid: results are cleared and export is disabled. Correct the
+bolt length/engagement or the stack geometry to resume updating; the program
+never silently lengthens the bolt.
 
-The Tk general window uses the same dark palette with the standard-library
-`clam` ttk theme, including entries, dropdowns, lists, report text and status
-messages. The SVG compression-cone fill opacity is **6 %**. Tk Canvas has no
-true alpha compositing, so the cone uses a **transparent, unfilled dashed
-outline**, not a light-colored opaque substitute. Plate colors and hatching
-remain visible. These rendering choices do not change any calculation.
+### English / Chinese
 
-### Chinese / English
-
-The **中文 / English** selector in the general web and Tk toolbars changes
-the input labels/options, drawing annotations, checks, warnings, field errors
-and TXT report together. The preview and exported UTF-8 TXT use the same
-language. Numerical values, units, provenance and input schema
-`vdi2230.general/3` are unchanged.
+A new window **defaults to English**. The **中文 / English** selector in the
+toolbar changes the input labels/options, drawing annotations, checks,
+warnings, field errors and TXT report of the current window together. The
+preview and exported UTF-8 TXT use the same language. Numerical values, units,
+provenance and input schema `vdi2230.general/3` are unchanged.
 
 Switching retains parameters (including their entered text), plate selection
 and user overrides. Untouched application-generated titles and plate names
 follow the language: **General bolt joint** and **clamped plate 1, 2, …** in
 English, **通用螺栓连接** and **板 1、2、…** in Chinese. Newly added plates use
-the current language. Once edited, names are user text and are **not translated**,
-even if they match a default name. Loaded design names and user-supplied
-provenance are also preserved.
-Invalid inputs remain invalid: export stays disabled, and the last valid
-drawing remains visibly marked as stale in the selected language.
+the current language. Once edited, names are user text and are **not
+translated**, even if they match a default name. Operating-system file-dialog
+controls follow the OS language. Translation uses a bundled offline catalog,
+not a network service; programmatic report rendering accepts
+`render_general_report(result, language="en")` or `"zh"`.
 
-If a thickness edit makes the clamped stack too long for the selected bolt,
-the input is invalid: the old section is explicitly marked as stale, results
-are cleared and export is disabled. Correct the bolt length/engagement or the
-stack geometry to resume updating; the program never silently lengthens the
-bolt. English validation messages follow the same behavior as Chinese.
-Web input edits invalidate in-flight responses immediately, before the
-debounce timer fires, so an older result cannot re-enable export.
+Input schema `vdi2230.general/3` uses independent `bolt.thread_friction` and
+`bolt.bearing_friction` values (both default to 0.12, not linked) plus
+`head_washer` and `nut_washer` objects. Versions 1/2 and
+`plates[].bearing_friction` are explicitly rejected, so older inputs must be
+reviewed and both bolt friction values confirmed.
 
-The web selection is reflected in the URL: open
-<http://127.0.0.1:8765/?lang=en> for English or `?lang=zh` for Chinese.
-Refreshing retains the URL language, **not the design parameters**.
-Both the web UI (without `lang`) and a new Tk window **default to English**.
-The Tk selector applies to the current window.
-Operating-system file-dialog controls follow the OS language.
-**B1–B5 reference mode is unchanged and does not have this language switch.**
+## Automated tests
 
-For programmatic general calculations, send `"language": "en"` or `"zh"` next
-to `input` in `POST /api/general/calculate` (default: `zh`).
-Report rendering also accepts `render_general_report(result, language="en")`.
-Unsupported language codes are rejected; translation uses a bundled offline
-catalog, not a network translation service.
-
-On `/reference`, select B1–B5 and click **计算**. The right column shows each available safety
-factor's PDF reference, calculated value and relative error, expandable full
-results and source details, and a TXT preview/download. Switching cases or a
-failed calculation clears the previous result and disables export. B1 remains
-**需确认** because of its unresolved additional-compliance source contradiction;
-its report can be exported but explicitly retains the incomplete status.
-The section is schematic, not a manufacturing drawing. JSON project save/load
-is only available in the desktop reference verifier.
-
-### Automated tests
-
-The application uses only the Python standard library at runtime. Run calculation,
-domain, desktop-contract and HTTP API tests without test dependencies:
+The application uses only the Python standard library at runtime and the
+tests need no extra dependencies:
 
 ```sh
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
-For real browser UI tests, install the optional test extra in a virtual environment:
+The suite covers:
 
-```sh
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install -e '.[ui-test]'
-python -m playwright install chromium
-PYTHONPATH=src python -m unittest discover -s tests/browser -v
-```
+- General engine, catalog/material data, washers, reports and both languages
+  through the toolkit-neutral `GeneralFormModel` and the Canvas section model.
+- Tk window behavior (`tests/test_general_desktop_window.py`): input-driven
+  redraws, part clicks and field focus, language switching, stale sections,
+  TXT export, `--version` and the removed `--reference` option. These tests
+  skip automatically when no display is available.
+- **Internal B1–B5 regression** (`tests/test_reference_cases.py`): the fixed
+  Appendix B cases are recalculated and each of the 12 printed safety factors
+  (B1 SF/Sp; B2 SG; B3 Sp/SG; B4 SD/SpK/SpMu/SG; B5 SF/SD/Sp) must stay within
+  3 %. B1 keeps its documented additional-compliance source contradiction.
+- Release boundaries (`tests/test_release_structure.py`): version 0.0.1, a
+  single `vdi2230` entry point, no Web/reference UI modules, and calculation
+  without Tk or HTTP server modules.
 
-On Windows, activate with `.venv\Scripts\Activate.ps1`; after the editable
-installation, run the same `python -m unittest ...` commands without `PYTHONPATH`.
-Browser tests start their own local server on an available port, launch Chromium,
-and clean up both. For the general page they cover the single-viewport layout,
-catalog selection, washer estimates/overrides, part clicks and field focus,
-independent bolt friction, dark-theme contrast, transparent Tk cones,
-layer add/select via the section, field errors, stale
-responses and TXT export; for `/reference` they cover all five cases and 12
-safety-factor comparisons, read-only inputs, result invalidation, error/retry,
-out-of-order responses, UTF-8 report downloads, and desktop/narrow layouts.
-Tk window tests (`tests/test_general_desktop_window.py`) skip automatically
-when no display is available.
-
-In VS Code, select the environment with the test extra installed, then use
-**Tasks: Run Task**: **VDI 2230: Web UI**, **VDI 2230: Unit and API tests**, or
-**VDI 2230: Browser UI tests**. Stable selectors for browser automation:
-
-- General page: `#project-title`, `#verdict`, `#tab-bolt` … `#tab-assembly`,
-  field rows `.field[data-path="bolt.length"]` (layer fields:
-  `.field[data-path="plates[0].thickness"]`), `#layers`, `#add-layer`,
-  `#section rect[data-role="plate-0"]`, `#key-metrics`,
-  `#section rect[data-role="washer-head"]`, `#section polygon[data-role="nut"]`,
-  `.field[data-path="head_washer.enabled"]`,
-  `#checks-table tr[data-symbol="SF"]`, `#values-table`, `#report-preview`,
-  `#export`, `#error`.
-- Reference page: the labels `计算实例`, `计算`, `导出 TXT`, and `#section`,
-  `#safety-table tr[data-symbol="SF"]`, `#results-table`, `#status`, `#error`.
-
-The general API (`GET /api/general/schema`, `GET /api/general/catalog`,
-`GET /api/general/catalog-values?variant=…&length=…&class=…`,
-`POST /api/general/calculate`) returns field-level errors as
-`{"field_errors": [{"path", "message"}]}`.
-The input schema is now `vdi2230.general/3`. Submit independent
-`bolt.thread_friction` and `bolt.bearing_friction` values; both default to 0.12
-but are not linked. `head_washer` and `nut_washer` objects are retained.
-Versions 1/2 and `plates[].bearing_friction` are explicitly rejected: older
-inputs must be reviewed and both bolt friction values confirmed, rather than
-silently changing an old calculation. Restart running Python processes and
-reload the web page after updating.
+In VS Code, use **Tasks: Run Task** → **VDI 2230: Tk UI** or
+**VDI 2230: All tests**.

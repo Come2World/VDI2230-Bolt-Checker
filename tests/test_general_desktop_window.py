@@ -1,4 +1,5 @@
 from copy import deepcopy
+from io import StringIO
 import tempfile
 import tkinter as tk
 from tkinter import ttk
@@ -8,6 +9,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from vdi2230 import __main__ as entry
+from vdi2230 import __version__
 from vdi2230.ui.general_model import entry_text
 from vdi2230.infrastructure.general_section import DRAWING_BACKGROUND, PLATE_FILLS, TEXT_FILL
 from vdi2230.ui.general_window import ACCENT, INPUT_BACKGROUND, PANEL, WINDOW_MIN_SIZE, WINDOW_SIZE, GeneralWindow, fit_window
@@ -476,18 +478,34 @@ class GeneralWindowTests(unittest.TestCase):
             self.assertEqual(target.read_text(encoding="utf-8"), self.window.report())
         self.assertEqual(self.window.status_var.get(), "已导出 report.txt")
 
-    def test_reference_window_opens_as_toplevel(self):
-        reference = self.window.open_reference()
-        self.assertIsInstance(reference, tk.Toplevel)
-        self.assertIn("VDI", reference.title())
-        reference.destroy()
+    def test_only_the_general_calculator_is_exposed_in_both_languages(self):
+        self.assertFalse(hasattr(self.window, "open_reference"))
+        for language in ("zh", "en"):
+            self.window.set_language(language)
+            pending = [self.root]
+            while pending:
+                widget = pending.pop()
+                pending.extend(widget.winfo_children())
+                if isinstance(widget, ttk.Button):
+                    self.assertNotRegex(str(widget.cget("text")), r"Reference|B[1-5]")
 
 
 class EntryPointTests(unittest.TestCase):
     def test_help_exits_cleanly(self):
-        with mock.patch("sys.stdout"), self.assertRaises(SystemExit) as context:
-            entry.main(["--help"])
+        with mock.patch("sys.stdout", new_callable=StringIO) as output:
+            with self.assertRaises(SystemExit) as context:
+                entry.main(["--help"])
         self.assertEqual(context.exception.code, 0)
+        self.assertNotIn("--reference", output.getvalue())
+
+    def test_version_does_not_open_a_window(self):
+        with mock.patch.object(entry.tk, "Tk") as tk_class, \
+                mock.patch("sys.stdout", new_callable=StringIO) as output:
+            with self.assertRaises(SystemExit) as context:
+                entry.main(["--version"])
+        self.assertEqual(context.exception.code, 0)
+        self.assertEqual(output.getvalue().strip(), f"vdi2230 {__version__}")
+        tk_class.assert_not_called()
 
     def test_default_launches_general_window(self):
         with mock.patch.object(entry.tk, "Tk") as tk_class, \
@@ -496,12 +514,13 @@ class EntryPointTests(unittest.TestCase):
         window_class.assert_called_once_with(tk_class.return_value)
         tk_class.return_value.mainloop.assert_called_once()
 
-    def test_reference_flag_launches_reference_window(self):
+    def test_removed_reference_flag_is_rejected_before_opening_a_window(self):
         with mock.patch.object(entry.tk, "Tk") as tk_class, \
-                mock.patch("vdi2230.ui.main_window.MainWindow") as window_class, \
-                mock.patch("vdi2230.ui.reference_cases.build_reference_cases", return_value=["cases"]):
-            entry.main(["--reference"])
-        window_class.assert_called_once_with(tk_class.return_value, ["cases"])
+                mock.patch("sys.stderr"):
+            with self.assertRaises(SystemExit) as context:
+                entry.main(["--reference"])
+        self.assertEqual(context.exception.code, 2)
+        tk_class.assert_not_called()
 
 
 if __name__ == "__main__":

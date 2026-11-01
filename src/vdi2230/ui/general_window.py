@@ -1,6 +1,6 @@
 """Tk desktop front end for the general calculator.
 
-Same three-pane layout as the web UI: tabbed inputs, an interactive 2D
+Three-pane layout: tabbed inputs, an interactive 2D
 section (click a plate to edit it) and tabbed results with TXT export.
 All state lives in :class:`GeneralFormModel`; this module only binds widgets.
 """
@@ -246,7 +246,6 @@ class GeneralWindow:
         self.title_var = tk.StringVar(value=self.model.title)
         ttk.Entry(top, textvariable=self.title_var, width=28).pack(side=tk.LEFT, padx=(10, 0))
         self.title_var.trace_add("write", self._on_title)
-        ttk.Button(top, text="参考算例 B1–B5", command=self.open_reference).pack(side=tk.RIGHT)
         self.language_var = tk.StringVar(value="中文" if self.language == "zh" else "English")
         self.language_selector = ttk.Combobox(top, textvariable=self.language_var, values=("中文", "English"), width=7, state="readonly")
         self.language_selector.pack(side=tk.RIGHT, padx=4)
@@ -878,11 +877,3 @@ class GeneralWindow:
                 self.root.after_cancel(job)
         self._calc_job = self._draw_job = None
         self.root.destroy()
-
-    def open_reference(self) -> tk.Toplevel:
-        from vdi2230.ui.main_window import MainWindow
-        from vdi2230.ui.reference_cases import build_reference_cases
-
-        window = tk.Toplevel(self.root)
-        MainWindow(window, build_reference_cases())
-        return window

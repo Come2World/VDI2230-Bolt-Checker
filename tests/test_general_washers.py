@@ -7,7 +7,6 @@ from vdi2230.domain.models import ResultStatus
 from vdi2230.infrastructure.general_report import render_general_report
 from vdi2230.infrastructure.general_section import general_section_shapes
 from vdi2230.ui.general_model import GeneralFormModel, canvas_item
-from vdi2230.web.general_api import calculate_payload
 
 from test_general_inputs import error_paths
 
@@ -192,33 +191,36 @@ class WasherCalculationTests(unittest.TestCase):
     def test_roughness_error_points_to_washer(self):
         payload = default_input_json()
         payload["head_washer"].update(enabled=True, roughness_rz=1000)
-        status, response = calculate_payload({"input": payload})
-        self.assertEqual(status, 400)
-        self.assertIn("head_washer.roughness_rz", [error["path"] for error in response["field_errors"]])
+        model = GeneralFormModel()
+        model.reset(payload)
+        outcome = model.calculate()
+        self.assertFalse(outcome.ok)
+        self.assertIn("head_washer.roughness_rz", [error.path for error in outcome.field_errors])
 
     def test_washer_bore_cannot_exceed_opposite_cone_in_a_single_plate(self):
         payload = default_input_json()
         payload["plates"] = [dict(payload["plates"][0], thickness=40)]
         payload["bolt"]["head_bearing_diameter"] = 25
         payload["head_washer"].update(enabled=True, inner_diameter=20, outer_diameter=30)
-        status, response = calculate_payload({"input": payload})
-        self.assertEqual(status, 400)
-        self.assertIn("head_washer.inner_diameter", [error["path"] for error in response["field_errors"]])
+        model = GeneralFormModel()
+        model.reset(payload)
+        outcome = model.calculate()
+        self.assertFalse(outcome.ok)
+        self.assertIn("head_washer.inner_diameter", [error.path for error in outcome.field_errors])
 
-    def test_report_and_api_include_washers_assumptions_and_click_targets(self):
+    def test_report_and_canvas_include_washer_assumptions_and_click_targets(self):
         payload = default_input_json()
         payload["head_washer"]["enabled"] = payload["nut_washer"]["enabled"] = True
         result = calculate(payload)
         report = render_general_report(result)
         for text in ("头侧垫片", "螺母侧垫片", "43.84", "支承摩擦 μK", "螺纹摩擦 μG", "δW", "Sp,W,K", "不计载荷扩散"):
             self.assertIn(text, report)
-        status, response = calculate_payload({"input": payload})
-        self.assertEqual(status, 200)
+        section = general_section_shapes(result.input, result.metrics, 640, 560)
         for role, target in (("washer-head", "head_washer.thickness"), ("washer-nut", "nut_washer.thickness"),
                              ("bolt-head", "bolt.head_height"), ("nut", "nut.height")):
-            shapes = [s for s in response["section"]["shapes"] if s["role"] == role]
+            shapes = [shape for shape in section if shape.role == role]
             self.assertTrue(shapes, role)
-            self.assertTrue(all(s["target"] == target for s in shapes))
+            self.assertTrue(all(f"target:{target}" in canvas_item(shape)[2]["tags"] for shape in shapes))
 
 
 class WasherDrawingTests(unittest.TestCase):
