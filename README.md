@@ -1,170 +1,189 @@
-# VDI 2230 Bolt Checker 0.0.1
+# VDI 2230 Bolt Calculator — 0.0.1
 
-This local Python desktop application (Tkinter, standard library only) performs a
-parameterized VDI 2230 Part 1:2015 calculation for a concentric single-bolt joint:
-through bolt with nut (DSV) or tapped thread (ESV), 1–10 clamped layers,
-solid/hollow and reduced-shank bolts, concentric axial load, transverse load and
-torque. Inputs drive the calculation, the 2D section and the safety factors
-(FMzul, SF, SD, Sp, mges, FKR, SG, SA) live; the result is exported as a UTF-8
-text report.
+Tk-only release on branch `VDI2230_BOLT_CHECKER_RELEASE_0.0.1`.
 
-Release 0.0.1 contains **only the Tk desktop UI**. The browser UI, its HTTP API
-and the separate B1–B5 reference-verifier window are not part of this release.
-The VDI 2230 Appendix B cases B1–B5 remain **internal automated regression
-tests** (see [Automated tests](#automated-tests)); they are not a user mode.
+A local Python desktop calculator for a **concentric single-bolt joint** under
+VDI 2230 Part 1:2015: through bolt with nut (DSV) or tapped thread (ESV),
+1–10 clamped plates, solid/hollow and reduced-shank bolts, concentric axial load,
+transverse load and torque. Inputs drive the calculation, interactive 2D section
+and checks (FMzul, SF, SD, Sp, mges, FKR, SG, SA). Results can be exported as a
+UTF-8 plain-text report.
 
-Eccentric clamping/loading, bending, thermal effects and multi-bolt load
-distribution are outside the general model. Bundled bolt, material and table
-data are **accepted as the project's calculation baseline** (`accepted_baseline`).
-Their values and source records are retained; using the database no longer
-forces a review verdict. This is a project acceptance policy, not a claim of
-independent certification. Empirical washer dimensions, unverified model
-assumptions and unknown source records still require review; failed checks
-remain failures. The tool does not replace the standard, engineering judgment,
-or design review.
+**Not covered:** eccentric clamping/loading, bending, thermal effects, bolt-group
+load distribution, 3D/CAD or finite-element analysis. Loads must already be
+expressed for the single bolt being checked. The drawing is schematic, not a
+manufacturing drawing or a stress plot.
 
-### Ownership of inputs
+Bundled bolt, material and table records are **accepted as the project's
+calculation baseline** (`accepted_baseline`). Values, sources and audit notes
+are retained. This policy is not independent certification. Empirical dimensions,
+unverified model assumptions and unknown source records still require review;
+failed checks remain failures. This tool does not replace the official standard,
+engineering judgment or design review.
 
-Thread friction μG and bearing friction μK belong to the bolt and are
-**independently editable**; changing one never changes the other. μK applies
-to the rotating head/nut bearing contact. Thickness, material, roughness Rz and
-interface friction μT belong to each plate layer,
-ordered from the bolt head. Bolt data are chosen from the hex-bolt catalog
-(ISO 4014/4017, M6–M30, 8.8/10.9/12.9) first; any catalog value can be
-overridden, and the override is kept when the bolt length changes.
+## Install and start
 
-Optional head-side and nut-side **plain washers** are edited on the
-**Plates / 板层** tab. Nut-side washers apply only to DSV; their settings are
-retained but not used when switching to ESV. Both washers are off by default.
-Initial dimensions are empirical, not ISO catalog data: **di = 1.1d, Do = 2d,
-t = 0.16d** (mm; M12: 13.2 / 24 / 1.92). Unmodified estimates follow
-nominal-diameter changes; manual overrides remain unchanged. Material, modulus,
-limiting surface pressure and roughness are also editable. S355J0 is only the
-initial material selection, not a claim about the grade of any purchased washer.
+Python **3.10 or newer**, with **Tkinter/Tcl/Tk** and a graphical desktop, is
+required. Runtime calculations and tests use the Python standard library.
+Tkinter is supplied by the Python distribution or operating system, not by pip.
+`python -m tkinter` opens a small window to check its availability.
 
-### General-model assumptions
-
-- FVmax = FMzul − FZ is used for the bearing-pressure check under service load.
-- DSV deformation cones use the head bearing diameter on the head side and the
-  nut bearing diameter on the nut side.
-- The R11 shear area uses A0 = min(AS, AT) minus the bore.
-- ISO 965 thread tolerances for the engagement check are approximated.
-- Washers use a **conservative plain-washer model**, not a spring/Belleville
-  model. Grip length includes their thickness; washer annular compression
-  compliance is added in series with the plate compliance. Plate cones use
-  only the plate-stack length. No load spreading across the washer is assumed:
-  `Deff = min(dW, Do, DA)`, `di,eff = max(di, dh, dha)`,
-  `Aeff = π/4(Deff² − di,eff²)`, `δW = t/(EW·Aeff)`.
-  Adjacent plate compliance uses the larger of its hole and washer bore.
-- Both washer contact faces are checked; Sp,K / Sp,M report the minimum of
-  the washer and adjacent plate safety factors (components appear in the full
-  results). Washer interfaces contribute to table-based embedding, not to the
-  user-specified slip-interface count. Manual fZ or interface-count overrides
-  must include washer effects.
-- Torque uses the rotating head/nut-to-washer contact annulus, not the full
-  washer OD, and assumes the washer stays stationary. Washer bending and actual
-  contact/load distribution are unverified; enabled washers retain a
-  **review required / 需确认** model flag even when all geometry is manually
-  entered.
-
-Regression of the general engine against the source (same inputs as B1–B3):
-B1 SF +0.45 %, Sp −0.18 %, MA +0.88 %; B2 SG +0.32 %, Sp −0.28 %, SA 0.00 %,
-MA +0.56 %; B3 SG/Sp/FMzul/MA 0.00 %. **B3 uses μG = 0.12 and μK = 0.10**,
-reproducing the source tightening torque of **521.135 N·m**. No shared-friction
-assumption or special torque correction is used. The B1 Φ difference comes
-from the source mixing w = 1 geometry with δPzu = δM; B3 R11 in the source uses
-FMzul and 1.2·P.
-
-## Run from the repository root
+From the repository root on macOS:
 
 ```sh
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install -e .
-vdi2230              # Tk desktop calculator
-vdi2230 --version    # prints "vdi2230 0.0.1" without opening a window
+vdi2230
 ```
 
-Without installation: `PYTHONPATH=src python3 -m vdi2230`.
-On Windows, activate with `.venv\Scripts\Activate.ps1`.
-After updating the code, close and restart any running window.
+On Windows PowerShell:
 
-### Desktop window
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e .
+vdi2230
+```
 
-The window uses a compact three-pane layout with a dark cyberpunk palette
-(standard-library `clam` ttk theme). Pass/fail/review keep distinct
-green/red/amber colors and text labels.
+After installation, `python -m vdi2230` also starts the same Tk window.
+`vdi2230 --version` prints `vdi2230 0.0.1`; `vdi2230 --help` lists supported
+options. Without installation on macOS, use:
 
-- **Left** – inputs in four tabs (Bolt / Plates / Loads / Assembly). Catalog and
-  material values are marked (cyan = accepted catalog, amber = estimate/review);
-  irrelevant fields (nut vs. tapped part, table vs. manual modes) are hidden.
-- **Center** – engineering-style Canvas section: chamfered hex-head/nut
-  profiles, unhatched bolt, thread-root lines, alternating plate/washer
-  hatching, centerline and dimensions (d, layer thickness, lK, l, DA). Click a
-  bolt, nut, washer or plate to activate its input tab and focus its field.
-  **+ Plate** inserts a copy below the selected layer. Tk Canvas has no true
-  alpha compositing, so the compression cone is a transparent, unfilled dashed
-  outline that keeps the plates behind it visible. The drawing is schematic,
-  not manufacturing-ready.
-- **Right** – verdict, safety-factor table, filterable full results and the
-  text report with **Export TXT**.
+```sh
+PYTHONPATH=src python3 -m vdi2230
+```
 
-Calculation runs automatically 300 ms after an edit. Invalid fields are
-listed and marked on their tab; the last valid section stays visible with a
-"Section not updated" overlay and export is disabled until the input is fixed.
-If a thickness edit makes the clamped stack too long for the selected bolt,
-the input is invalid: results are cleared and export is disabled. Correct the
-bolt length/engagement or the stack geometry to resume updating; the program
-never silently lengthens the bolt.
+After switching branches or updating the installation, rerun
+`python -m pip install -e .` to refresh command entry points. Restart an already
+running Tk window to load the new code. No local server or browser is required.
 
-### English / Chinese
+## Desktop workflow
 
-A new window **defaults to English**. The **中文 / English** selector in the
-toolbar changes the input labels/options, drawing annotations, checks,
-warnings, field errors and TXT report of the current window together. The
-preview and exported UTF-8 TXT use the same language. Numerical values, units,
-provenance and input schema `vdi2230.general/3` are unchanged.
+The window opens in **English** and uses a compact three-pane layout:
 
-Switching retains parameters (including their entered text), plate selection
-and user overrides. Untouched application-generated titles and plate names
-follow the language: **General bolt joint** and **clamped plate 1, 2, …** in
-English, **通用螺栓连接** and **板 1、2、…** in Chinese. Newly added plates use
-the current language. Once edited, names are user text and are **not
-translated**, even if they match a default name. Operating-system file-dialog
-controls follow the OS language. Translation uses a bundled offline catalog,
-not a network service; programmatic report rendering accepts
-`render_general_report(result, language="en")` or `"zh"`.
+- **Left:** Bolt / Plates / Loads / Assembly tabs. Choose catalog geometry and
+  materials, then adjust values as needed. Cyan markers identify accepted
+  catalog values; amber marks estimates/review sources. Irrelevant fields are
+  hidden for the selected joint or calculation mode.
+- **Center:** the section and key metrics. Click a bolt, nut, washer or plate
+  to activate the corresponding input tab and focus its field. Add, remove,
+  select and move plates; adding inserts a copy below the selected plate.
+- **Right:** overall verdict, individual checks, filterable full results and
+  report preview. **Export TXT** saves the report currently displayed.
 
-Input schema `vdi2230.general/3` uses independent `bolt.thread_friction` and
-`bolt.bearing_friction` values (both default to 0.12, not linked) plus
-`head_washer` and `nut_washer` objects. Versions 1/2 and
-`plates[].bearing_friction` are explicitly rejected, so older inputs must be
-reviewed and both bolt friction values confirmed.
+Calculation runs automatically about **300 ms** after an edit. An edit
+immediately disables export. Invalid inputs clear the results/report, identify
+the errors and visibly mark the last valid section as stale. Correcting the
+inputs restores calculation and drawing updates.
 
-## Automated tests
+In particular, increasing plate or washer thickness can make the grip too long
+for the bolt. Correct the length/engagement or stack geometry; the program
+never silently lengthens the bolt or labels old geometry with new dimensions.
 
-The application uses only the Python standard library at runtime and the
-tests need no extra dependencies:
+The cyberpunk palette uses deep navy, cyan and purple. Pass/fail/review have
+both distinct colors and text. The section includes chamfers, hex-face curves,
+thread-root lines, alternate plate/washer hatching, a centerline and dimensions.
+Compression cones have **no fill and dashed outlines**, so plates remain visible.
+These display choices do not change calculations.
+
+The initial window is 1440×860, reduced and centered to fit smaller screens.
+Operating-system window decorations and file-dialog controls remain native.
+This release exports TXT reports; it does **not** provide design-project
+save/load controls.
+
+## Inputs and washers
+
+Thread friction **μG** and bearing friction **μK** belong to the bolt and are
+**independently editable**. Both start at 0.12; changing one never changes the
+other. μK describes the rotating head/nut bearing contact. Plate thickness,
+material, roughness Rz and interface friction μT belong to each ordered plate.
+
+The hex-bolt catalog covers ISO 4014/4017, M6–M30 coarse threads and
+8.8/10.9/12.9 property classes. Catalog values may be overridden; overrides
+survive bolt-length changes. Suggested lengths do not guarantee commercial
+availability for every standard/diameter combination.
+
+Optional head-side and nut-side **plain washers** are on the **Plates** tab.
+Both are off by default. ESV retains but does not use nut-side washer settings.
+Initial estimates are **di = 1.1d, Do = 2d, t = 0.16d**, in mm
+(M12: 13.2 / 24 / 1.92). These are empirical, not ISO catalog dimensions.
+Unmodified estimates follow diameter changes; manual overrides remain unchanged.
+Material, elastic modulus, limiting surface pressure and roughness are editable.
+S355J0 is an initial selection, not a claim about any purchased washer.
+
+### Calculation assumptions
+
+- Working bearing pressure uses **FVmax = FMzul − FZ**.
+- DSV deformation cones start at the respective head and nut bearing diameters.
+- The R11 shear area uses **A0 = min(AS, AT)** minus the bore.
+- ISO 965 thread tolerances for engagement are approximated.
+- Washers use a **conservative plain-washer model**, not a spring/Belleville
+  model. Their thickness contributes to grip length, bolt compliance,
+  engagement and shear-plane position. Plate cones use the plate-stack length.
+- Washer annular compliance is added in series with plate compliance:
+  `Deff = min(dW, Do, DA)`, `di,eff = max(di, dh, dha)`,
+  `Aeff = π/4(Deff² − di,eff²)`, `δW = t/(EW·Aeff)`.
+  No load spreading across the washer is assumed. Adjacent plate compliance
+  uses the larger of its hole and washer bore.
+- Both washer contact faces are checked. Sp,K / Sp,M use the minimum of the
+  washer and adjacent plate factors; components appear in the full results.
+  Washer interfaces contribute to table-based embedding, not automatically to
+  the user-specified slip-interface count. Manual fZ/interface overrides must
+  include washer effects.
+- Torque uses the rotating head/nut-to-washer contact annulus, not the full
+  washer OD, and assumes a stationary washer. Washer bending, local yielding
+  and actual contact/load distribution require separate verification.
+  Enabled washers retain a **Review** model flag even with manual dimensions.
+
+## Chinese / English
+
+The **中文 / English** selector changes labels/options, section annotations,
+checks, warnings, field errors and the TXT report together. Numerical values,
+units, source identifiers and input schema `vdi2230.general/3` do not change.
+Translation is fully offline.
+
+Switching preserves entered text (including `0.10`), overrides, selected plate
+and input tab. Untouched generated titles/names follow the language:
+**General bolt joint**, **clamped plate 1, 2, …** or **通用螺栓连接**,
+**板 1、2、…**. User-edited or programmatically loaded names remain unchanged,
+even if they match a generated name. New plates use the current language.
+Invalid inputs remain invalid after switching; export stays disabled and the
+old section remains visibly stale.
+
+Programmatic inputs use separate `bolt.thread_friction` and
+`bolt.bearing_friction` fields. Schema versions 1/2 and
+`plates[].bearing_friction` are rejected rather than silently reinterpreted.
+Application version, input schema and engineering-data versions are independent.
+
+## Tests and development
+
+After installation:
+
+```sh
+python -m unittest discover -s tests -v
+```
+
+Or, from the source tree on macOS:
 
 ```sh
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
-The suite covers:
+The suite covers calculations, engineering data, internal standard-example
+regressions, field validation, washers, bilingual reports and actual Tk widgets.
+It exercises real debounce callbacks, part clicks, layer edits, stale drawings,
+failure recovery and TXT export. Tests need no third-party test packages.
+Tk window tests skip when no display is available; such a run is **not** desktop
+release acceptance. Run the suite with Tk and a display for GUI validation.
 
-- General engine, catalog/material data, washers, reports and both languages
-  through the toolkit-neutral `GeneralFormModel` and the Canvas section model.
-- Tk window behavior (`tests/test_general_desktop_window.py`): input-driven
-  redraws, part clicks and field focus, language switching, stale sections,
-  TXT export, `--version` and the removed `--reference` option. These tests
-  skip automatically when no display is available.
-- **Internal B1–B5 regression** (`tests/test_reference_cases.py`): the fixed
-  Appendix B cases are recalculated and each of the 12 printed safety factors
-  (B1 SF/Sp; B2 SG; B3 Sp/SG; B4 SD/SpK/SpMu/SG; B5 SF/SD/Sp) must stay within
-  3 %. B1 keeps its documented additional-compliance source contradiction.
-- Release boundaries (`tests/test_release_structure.py`): version 0.0.1, a
-  single `vdi2230` entry point, no Web/reference UI modules, and calculation
-  without Tk or HTTP server modules.
+In VS Code, select the project Python environment, then use **Tasks: Run Task**:
+**VDI 2230: Tk UI** or **VDI 2230: All tests**.
 
-In VS Code, use **Tasks: Run Task** → **VDI 2230: Tk UI** or
-**VDI 2230: All tests**.
+The current validation environment is macOS. Windows remains a target platform;
+Windows installation, native dialogs and display behavior require validation
+on that operating system before claiming platform acceptance.
+
+See the [requirements](./SOFTWARE_REQUIREMENTS_SPECIFICATION.md),
+[architecture and release checks](./SOFTWARE_ARCHITECTURE_AND_BUILD_PLAN.md)
+and [catalog sources/licenses](./src/vdi2230/data/bolt_catalog/README.md).

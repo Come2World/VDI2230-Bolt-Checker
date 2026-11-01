@@ -12,7 +12,7 @@ from vdi2230 import __main__ as entry
 from vdi2230 import __version__
 from vdi2230.ui.general_model import entry_text
 from vdi2230.infrastructure.general_section import DRAWING_BACKGROUND, PLATE_FILLS, TEXT_FILL
-from vdi2230.ui.general_window import ACCENT, INPUT_BACKGROUND, PANEL, WINDOW_MIN_SIZE, WINDOW_SIZE, GeneralWindow, fit_window
+from vdi2230.ui.general_window import ACCENT, INPUT_BACKGROUND, PANEL, STATUS_COLORS, WINDOW_MIN_SIZE, WINDOW_SIZE, GeneralWindow, fit_window
 
 
 class FitWindowTests(unittest.TestCase):
@@ -454,6 +454,27 @@ class GeneralWindowTests(unittest.TestCase):
         self.assertEqual(len(plates), 2)
         self.assertTrue(all(window.canvas.itemcget(item, "fill") == PLATE_FILLS[0] for item in plates))
         self.assertTrue(window.canvas.find_withtag("grid"))
+
+    def test_main_text_and_status_colors_meet_contrast_threshold(self):
+        def luminance(color):
+            channels = [channel / 65535 for channel in self.root.winfo_rgb(color)]
+            linear = [value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4
+                      for value in channels]
+            return sum(value * weight for value, weight in zip(linear, (0.2126, 0.7152, 0.0722)))
+
+        style = ttk.Style(self.root)
+        pairs = dict(STATUS_COLORS)
+        for name in ("TLabel", "Muted.TLabel", "Unit.TLabel", "TNotebook.Tab", "Treeview", "Treeview.Heading"):
+            pairs[name] = (style.lookup(name, "foreground"), style.lookup(name, "background"))
+        for name in ("TEntry", "TCombobox"):
+            pairs[name] = (style.lookup(name, "foreground", ("readonly",)),
+                           style.lookup(name, "fieldbackground", ("readonly",)))
+        for name, widget in (("report", self.window.report_text), ("plates", self.window.layer_list)):
+            pairs[name] = (widget.cget("foreground"), widget.cget("background"))
+        for name, (foreground, background) in pairs.items():
+            with self.subTest(element=name):
+                light, dark = sorted((luminance(foreground), luminance(background)), reverse=True)
+                self.assertGreaterEqual((light + 0.05) / (dark + 0.05), 4.5)
 
     def test_layer_selection_highlights_plate_and_reveals_tab(self):
         window = self.window
