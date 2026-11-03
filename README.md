@@ -64,17 +64,6 @@ Use `vdi2230 --version` to check the version or `vdi2230 --help` for options.
 Rerun `python -m pip install -e .` after changing branches or updating the
 installation, then restart the application.
 
-### Troubleshooting
-
-- **`python: command not found` after moving or renaming the project:** the
-  virtual environment may still point to the old folder. Run `deactivate` if
-  it is active, then repeat the setup commands above to refresh the environment
-  and editable installation.
-- **Tkinter missing:** install Tk support for your Python distribution.
-  Run `python -m tkinter` in the activated environment to check it.
-- **Run without installing on macOS:** use
-  `PYTHONPATH=src python3 -m vdi2230` with a Python that has Tkinter.
-
 ## Basic workflow
 
 Just follow VDI 2230 PART 1.
