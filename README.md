@@ -1,316 +1,128 @@
-# VDI 2230 Bolt Calculator — 0.0.1
+# VDI 2230 Bolt Checker
 
-Tk-only release on branch `VDI2230_BOLT_CHECKER_RELEASE_0.0.1`.
+**Version 0.0.1** — An offline Python desktop application for checking
+concentric single-bolt joints using VDI 2230 Part 1:2015.
 
-A local Python desktop calculator for a **concentric single-bolt joint** under
-VDI 2230 Part 1:2015: through bolt with nut (DSV) or tapped thread (ESV),
-1–10 clamped plates, solid/hollow and reduced-shank bolts, concentric axial load,
-transverse load and torque. Inputs drive the calculation, interactive 2D section
-and checks (FMzul, SF, SD, Sp, mges, FKR, SG, SA). Results can be exported as a
-UTF-8 Markdown report. Designs can be saved and loaded as JSON project files.
+Enter joint geometry, materials and loads to calculate safety checks, view an
+interactive 2D section, and export a calculation report. No browser, server
+or internet connection is needed.
 
-**Not covered:** eccentric clamping/loading, bending, thermal effects, bolt-group
-load distribution, 3D/CAD or finite-element analysis. Loads must already be
-expressed for the single bolt being checked. The drawing is schematic, not a
-manufacturing drawing or a stress plot.
+## Features
 
-Bundled bolt, material and table records are **accepted as the project's
-calculation baseline** (`accepted_baseline`). Values, sources and audit notes
-are retained. This policy is not independent certification. Empirical dimensions,
-unverified model assumptions and unknown source records still require review;
-failed checks remain failures. This tool does not replace the official standard,
-engineering judgment or design review.
+- **Joint types:** through bolt with nut (DSV) and tapped thread (ESV).
+- **Geometry:** 1–10 clamped plates, optional plain washers, solid/hollow and
+  reduced-shank bolts, and blind/through tapped holes.
+- **Bolt catalog:** ISO 4014/4017 hexagon bolts and ISO 4762 socket head screws,
+  M6–M30 catalog sizes, with editable dimensions and material properties.
+- **Calculations:** preload, joint compliance, strength, fatigue, bearing
+  pressure, thread engagement, slip/shear and tightening torque (R1–R13).
+- **Live results:** automatic recalculation, safety-check status and a clickable
+  section drawing.
+- **Files:** save/load designs as JSON and export reports as Markdown.
+- **Languages:** English and Chinese, including reports; translation is offline.
 
-## Install and start
+## Screenshots
 
-Python **3.10 or newer**, with **Tkinter/Tcl/Tk** and a graphical desktop, is
-required. Runtime calculations and tests use the Python standard library.
-Tkinter is supplied by the Python distribution or operating system, not by pip.
-`python -m tkinter` opens a small window to check its availability.
+### Tapped joint (ESV)
 
-From the repository root on macOS:
+![Tapped joint (ESV)](./images/ESV.png)
+
+### Through bolt with nut (DSV)
+
+![Through bolt with nut (DSV)](./images/DSV.png)
+
+## Quick start
+
+Requires **Python 3.10+**, **Tkinter/Tcl/Tk** and a graphical desktop.
+Runtime calculations and tests use the Python standard library. Tkinter comes
+from your Python distribution or operating system, not pip.
+
+Run these commands from the project folder.
+
+### macOS
 
 ```sh
 python3 -m venv .venv
-. .venv/bin/activate
+source .venv/bin/activate
 python -m pip install -e .
-vdi2230
+python -m vdi2230
 ```
 
-On Windows PowerShell:
+### Windows PowerShell
 
 ```powershell
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -e .
-vdi2230
+python -m vdi2230
 ```
 
-After installation, `python -m vdi2230` also starts the same Tk window.
-`vdi2230 --version` prints `vdi2230 0.0.1`; `vdi2230 --help` lists supported
-options. Without installation on macOS, use:
+After installation, `vdi2230` also launches the application.
+Use `vdi2230 --version` to check the version or `vdi2230 --help` for options.
+Rerun `python -m pip install -e .` after changing branches or updating the
+installation, then restart the application.
 
-```sh
-PYTHONPATH=src python3 -m vdi2230
-```
+### Troubleshooting
 
-After switching branches or updating the installation, rerun
-`python -m pip install -e .` to refresh command entry points. Restart an already
-running Tk window to load the new code. No local server or browser is required.
+- **`python: command not found` after moving or renaming the project:** the
+  virtual environment may still point to the old folder. Run `deactivate` if
+  it is active, then repeat the setup commands above to refresh the environment
+  and editable installation.
+- **Tkinter missing:** install Tk support for your Python distribution.
+  Run `python -m tkinter` in the activated environment to check it.
+- **Run without installing on macOS:** use
+  `PYTHONPATH=src python3 -m vdi2230` with a Python that has Tkinter.
 
-## Desktop workflow
+## Basic workflow
 
-The window opens in **English** and uses a compact three-pane layout:
+1. Set the bolt, plates, loads and assembly options in the left-hand tabs.
+2. Review the section drawing and live calculation results. Clicking a part
+   focuses its input fields.
+3. Correct input errors and review all failed or flagged checks. Invalid inputs
+   disable report export and mark the previous drawing as stale.
+4. Use **Save project / Load project** for reusable JSON designs.
+   Results are recalculated when a project is loaded.
+5. Use **Export Markdown** for a calculation report. Reports cannot be loaded
+   as design projects.
 
-- **Left:** Bolt / Plates / Loads / Assembly tabs. Choose catalog geometry and
-  materials, then adjust values as needed. Cyan markers identify accepted
-  catalog values; amber marks estimates/review sources. Irrelevant fields are
-  hidden for the selected joint or calculation mode.
-- **Center:** the section and key metrics. Click a bolt, nut, washer or plate
-  to activate the corresponding input tab and focus its field. Add, remove,
-  select and move plates; adding inserts a copy below the selected plate.
-- **Right:** overall verdict, individual checks, filterable full results and
-  report source preview. **Export Markdown** saves the report currently displayed.
-  Use **Save project / Load project** in the top bar for design inputs.
+## Scope and engineering notes
 
-Calculation runs automatically about **300 ms** after an edit. An edit
-immediately disables export. Invalid inputs clear the results/report, identify
-the errors and visibly mark the last valid section as stale. Correcting the
-inputs restores calculation and drawing updates.
+- Loads must be specified for a **single bolt**. Eccentric loading/clamping,
+  bending, thermal effects, bolt-group load distribution and 3D/FEA are not covered.
+  The section view is schematic, not a manufacturing drawing or stress plot.
+- Catalog values are editable calculation references, not product certification.
+  Confirm actual dimensions, material properties and availability.
+- **A2-90 is a supplier-specific reference**, not a universal ISO property class.
+  It requires an actual product shear-strength ratio. A2 bolts under alternating
+  axial load also need product-specific fatigue strength; otherwise fatigue
+  requires review.
+- A2 thread-stripping checks require actual maximum bolt tensile strength;
+  nonstandard nuts also require actual nut strength data. The matching-standard-nut
+  option is an assumption, not nut selection or certification.
+- Washer dimensions and blank tapped-hole dimensions may be estimated.
+  Replace estimates with actual measurements. The plain-washer model remains
+  flagged for review and does not verify washer bending or local yielding.
+- This tool supports engineering review; it does not replace the official
+  standard, engineering judgment or independent design verification.
 
-In particular, increasing plate or washer thickness can make the grip too long
-for the bolt. Correct the length/engagement or stack geometry; the program
-never silently lengthens the bolt or labels old geometry with new dimensions.
+## Development and tests
 
-The cyberpunk palette uses deep navy, cyan and purple. Pass/fail/review have
-both distinct colors and text. The section includes chamfers, hex-face curves,
-thread-root lines, alternate plate/washer hatching, a centerline and dimensions.
-Compression cones have **no fill and dashed outlines**, so plates remain visible.
-These display choices do not change calculations.
-
-The initial window is 1440×860, reduced and centered to fit smaller screens.
-Operating-system window decorations and file-dialog controls remain native.
-This release exports Markdown reports and saves/loads JSON design projects.
-
-## Saving projects and exporting reports
-
-- **Save project** writes a `.json` file with the title, all inputs (including
-  hidden DSV/ESV settings), ordered plates, washers and provenance. Input
-  validation and calculation must succeed; a failing or review safety check
-  does not prevent saving. Saving opens a file dialog, allowing another filename.
-- **Load project** validates the JSON format/schema and inputs, recalculates,
-  then replaces the form and section. Unsupported, corrupt or uncalculable
-  projects leave the current design unchanged. Loaded titles/plate names are
-  treated as user text; the current UI language is retained.
-- Loading another project or closing the window with changed inputs prompts
-  to save, discard or cancel. Cancelling a save keeps the design open.
-  File writes replace the target only after a complete write.
-- Project files use `vdi2230-bolt-project` envelope version 1 containing
-  `case_id: GENERAL` and nested `vdi2230.general/4` inputs. Results are **not**
-  trusted or stored; they are recalculated using the installed application.
-  Internal B1–B5 project snapshots are not desktop general projects.
-- **Export Markdown** writes UTF-8 `.md`; the report tab previews Markdown
-  source. Open the exported file in VS Code and use **Markdown: Open Preview**
-  to see the formatted headings/tables. Markdown reports cannot be loaded as
-  design projects.
-
-Section **3. Calculation steps and all results** contains R1–R13 in VDI order:
-tightening factor, required clamp load, compliances/load factor, preload losses,
-minimum preload, maximum preload, assembly strength, working strength, fatigue,
-bearing pressure, thread engagement, slip/shear, and tightening torque.
-All computed values appear once in their assigned step, with formula references;
-N/A and review checks retain explanations. R1 records the user-selected αA;
-the program does not automatically select a bolt diameter.
-
-## Inputs and washers
-
-Thread friction **μG** and bearing friction **μK** belong to the bolt and are
-**independently editable**. Both start at 0.12; changing one never changes the
-other. μK describes the rotating head/nut bearing contact. Plate thickness,
-material, roughness Rz and interface friction μT belong to each ordered plate.
-
-The bolt catalog covers ISO 4014/4017 hexagon head bolts and ISO 4762
-hexagon socket head cap screws (M6–M16, M20, M24, M30), M6–M30 coarse
-threads and 8.8/10.9/12.9 plus A2-70/A2-80/A2-90 property classes. Head
-geometry is independent of the property class; selecting an ISO 4762 variant
-switches the head type to socket and fills dk, k, socket size s, socket depth
-t and its own dW. The nut stays an ISO 4032 hexagon nut. Catalog values are
-editable; overrides survive bolt-length changes.
-Changing **Head type** also selects matching geometry at the current diameter
-and pitch and fills the head dimensions, without overwriting manual strength
-inputs. Geometry can be filled without selecting a property class. If no
-matching head exists in the catalog, the UI explicitly switches to custom
-geometry and requests dimensions instead of retaining an incompatible variant.
-
-The head bearing diameter **dW** drives the R10 bearing area
-`Ap = π/4·(dW²−dha²)`, the deformation-cone start diameter (βL = lP/dW,
-y = DA′/dW) and the R13 bearing friction diameter `DKm = (dW+dha)/2`; with a
-washer the effective annulus is `min(dW, Do)`. The section drawing shows the
-hex head at its width across corners e = 2s/√3 (socket heads at dk), the dW
-bearing face with a dimension line, and the effective bearing annulus
-highlighted under the head and nut. Head s, dk and socket sizes are
-drawing-only; blank or inconsistent values are estimated from dW. Suggested lengths and
-geometry/class combinations do not guarantee commercial availability.
-
-### ESV tapped-part geometry
-
-The Bolt tab's **Tapped part (ESV)** section supports blind and through holes,
-part thickness **H**, drilled depth **Lh** (blind holes only) and complete
-internal-thread depth **Lt**, all in mm. Depths start at the tapped part's
-contact face. H is **not** added to grip length lK.
-
-- Blank blind-hole Lh is estimated as `l − lK + 0.4d`; H is estimated as
-  `max(l − lK + d, Lh + 0.5d)`. Lh includes an estimated 118° drill tip.
-  The cylindrical depth excludes that tip. The bolt must not bottom out,
-  Lt cannot exceed the cylindrical depth, and Lh must be less than H.
-- Through holes use `Lh = H` and allow the bolt to protrude. Blank H is
-  estimated as `l − lK + 0.5d`; Lt cannot exceed H.
-- Blank Lt is the lesser of insertion and cylindrical depth. Actual engagement
-  is the overlap of the internal and external threads, additionally capped
-  by the optional **mges** input. A shorter Lt reduces the R11 available
-  engagement; zero overlap is an input error.
-- The section shows the part boundary, hole/drill tip, thread-depth limit,
-  and H/Lh/Lt/mges dimensions. Engaged thread lines are **red** and their length
-  matches R11; clicking them or a dimension focuses the corresponding input.
-  The report lists resolved dimensions and identifies blank dimensions as
-  estimates. Older inputs without these fields preserve their engagement.
-
-Estimates are starting geometry, not verified manufacturing dimensions;
-replace them with actual part and hole measurements for design checks.
-
-| Class | Minimum Rm / Rp0.2 | τB/Rm | Reference |
-|---|---:|---:|---|
-| A2-70 | 700 / 450 MPa | 0.72 | ISO 3506-1:2020 secondary summary; VDI Table 7 |
-| A2-80 | 800 / 600 MPa | 0.68 | ISO 3506-1:2020 secondary summary; VDI Table 7 |
-| A2-90 | 900 / 700 MPa | **User input required** | Specific supplier's SUS304CUN product |
-
-A2-90 is a **supplier-specific, editable reference**, not a claim that ISO
-3506 specifies an A2-90 class or that every A2-90 bolt has these properties.
-The cited [supplier](https://tomitarashi.com/a2-90_a2-100_bolt.html) lists
-M6, M8, M10, M12, M16 and M20 products with JIS B1180 geometry. The app offers
-the reference across its M6–M30 catalog for convenience; other sizes,
-manufacturers and the catalog's ISO 4014/4017 geometry are **not verified
-supplier products**. Confirm the actual product, dimensions and strengths.
-The reference strengths remain marked **Review** when used. See the
-[catalog documentation](./src/vdi2230/data/bolt_catalog/README.md) for sources.
-
-A2 bolt elastic modulus defaults to **200000 MPa**, using the project's
-X5CrNi18-10 material as a representative, editable value; it is not a
-manufacturer guarantee. A2-90 has no bundled shear-strength ratio: enter one
-from the actual product data before calculation. The default 205000 MPa nut
-modulus is independent; enter the actual value for the selected nut.
-
-When the class or retained source identifies an A2 bolt, the ISO 898-1
-steel-bolt fatigue reference formula is not applied. For a completely manual
-material with no identifying class or source, supply the appropriate product
-fatigue data rather than relying on the steel-bolt default.
-The σA field is **blank by default**: for 8.8/10.9/12.9 a blank field means
-the program calculates σASV/σASG (and σAZS for finite life) with the VDI R9
-formulas, shown in the report under R9. For A2 bolts under
-alternating axial load, enter the actual product's **fatigue strength
-amplitude σA** for the selected life, mean stress, geometry and reference
-section. It is the resistance before division by the required safety factor;
-the program uses it directly for `SD = σA / σa` without applying additional
-rolling or finite-life scaling. If absent, SD and the overall verdict require
-review instead of showing a fabricated fatigue factor. With no alternating
-load SD is not applicable. A manually entered amplitude also overrides the
-default estimate for other bolt classes and must be checked against the
-actual conditions.
-
-For A2 tapped joints or nonstandard nuts, an explicit actual bolt **Rm,max**
-is required to perform R11; the nonstandard-nut case also requires the nut's
-actual tensile strength and shear-strength ratio. Otherwise the R11 check
-requires review. The default **matching standard nut** checkbox waives
-stripping verification based on that assumption; it does not select or
-certify a nut. Check its actual material, class and dimensions. Changing the
-catalog variant, class, or nominal diameter clears any product-specific
-fatigue input and, when A2 is involved, maximum tensile strength; re-enter
-the applicable values. A length-only edit retains them.
-
-Optional head-side and nut-side **plain washers** are on the **Plates** tab.
-Both are off by default. ESV retains but does not use nut-side washer settings.
-Initial estimates are **di = 1.1d, Do = 2d, t = 0.16d**, in mm
-(M12: 13.2 / 24 / 1.92). These are empirical, not ISO catalog dimensions.
-Unmodified estimates follow diameter changes; manual overrides remain unchanged.
-Material, elastic modulus, limiting surface pressure and roughness are editable.
-S355J0 is an initial selection, not a claim about any purchased washer.
-
-### Calculation assumptions
-
-- Working bearing pressure uses **FVmax = FMzul − FZ**.
-- DSV deformation cones start at the respective head and nut bearing diameters.
-- The R11 shear area uses **A0 = min(AS, AT)** minus the bore.
-- ISO 965 thread tolerances for engagement are approximated.
-- Washers use a **conservative plain-washer model**, not a spring/Belleville
-  model. Their thickness contributes to grip length, bolt compliance,
-  engagement and shear-plane position. Plate cones use the plate-stack length.
-- Washer annular compliance is added in series with plate compliance:
-  `Deff = min(dW, Do, DA)`, `di,eff = max(di, dh, dha)`,
-  `Aeff = π/4(Deff² − di,eff²)`, `δW = t/(EW·Aeff)`.
-  No load spreading across the washer is assumed. Adjacent plate compliance
-  uses the larger of its hole and washer bore.
-- Both washer contact faces are checked. Sp,K / Sp,M use the minimum of the
-  washer and adjacent plate factors; components appear in the full results.
-  Washer interfaces contribute to table-based embedding, not automatically to
-  the user-specified slip-interface count. Manual fZ/interface overrides must
-  include washer effects.
-- Torque uses the rotating head/nut-to-washer contact annulus, not the full
-  washer OD, and assumes a stationary washer. Washer bending, local yielding
-  and actual contact/load distribution require separate verification.
-  Enabled washers retain a **Review** model flag even with manual dimensions.
-
-## Chinese / English
-
-The **中文 / English** selector changes labels/options, section annotations,
-checks, warnings, field errors and the Markdown report together. Numerical values,
-units, source identifiers and input schema do not change with the language.
-Translation is fully offline.
-
-Switching preserves entered text (including `0.10`), overrides, selected plate
-and input tab. Untouched generated titles/names follow the language:
-**General bolt joint**, **clamped plate 1, 2, …** or **通用螺栓连接**,
-**板 1、2、…**. User-edited or programmatically loaded names remain unchanged,
-even if they match a generated name. New plates use the current language.
-Invalid inputs remain invalid after switching; export stays disabled and the
-old section remains visibly stale.
-
-Programmatic inputs use schema `vdi2230.general/4`, with separate
-`bolt.thread_friction` and `bolt.bearing_friction` fields and optional
-`bolt.fatigue_strength_amplitude`. Schema 3 inputs without the new fatigue
-field are accepted and re-emitted as schema 4; older software rejects schema 4
-instead of silently ignoring the new input. Schema versions 1/2 and
-`plates[].bearing_friction` remain rejected rather than silently reinterpreted.
-Application version, input schema and engineering-data versions are independent.
-
-## Tests and development
-
-After installation:
+After installation, run:
 
 ```sh
 python -m unittest discover -s tests -v
 ```
 
-Or, from the source tree on macOS:
+Tests cover calculations, catalog data, input validation, reports, project
+files, translation and Tk widgets. GUI tests require Tk and a display;
+skipped GUI tests do not count as desktop validation.
 
-```sh
-PYTHONPATH=src python3 -m unittest discover -s tests -v
-```
-
-The suite covers calculations, engineering data, internal standard-example
-regressions, field validation, washers, bilingual reports and actual Tk widgets.
-It exercises real debounce callbacks, part clicks, layer edits, stale drawings,
-failure recovery, project save/load, cancelled/failed writes, and Markdown
-export with complete ordered R1–R13 results. Tests need no third-party test packages.
-Tk window tests skip when no display is available; such a run is **not** desktop
-release acceptance. Run the suite with Tk and a display for GUI validation.
-
-In VS Code, select the project Python environment, then use **Tasks: Run Task**:
+In VS Code, select the project Python environment and run the task
 **VDI 2230: Tk UI** or **VDI 2230: All tests**.
+The current validation platform is macOS; Windows still requires native testing.
 
-The current validation environment is macOS. Windows remains a target platform;
-Windows installation, native dialogs and display behavior require validation
-on that operating system before claiming platform acceptance.
+## Technical documentation
 
-See the [requirements](./SOFTWARE_REQUIREMENTS_SPECIFICATION.md),
-[architecture and release checks](./SOFTWARE_ARCHITECTURE_AND_BUILD_PLAN.md)
-and [catalog sources/licenses](./src/vdi2230/data/bolt_catalog/README.md).
+- [Software requirements](./SOFTWARE_REQUIREMENTS_SPECIFICATION.md)
+- [Architecture and release validation](./SOFTWARE_ARCHITECTURE_AND_BUILD_PLAN.md)
+- [Bolt catalog, sources and licenses](./src/vdi2230/data/bolt_catalog/README.md)

@@ -10,6 +10,31 @@ from vdi2230 import __version__, ui
 
 
 class ReleaseStructureTests(unittest.TestCase):
+    def test_readme_local_links_resolve(self):
+        root = Path(__file__).parents[1]
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        targets = re.findall(r"\]\((\./[^)]+)\)", readme)
+        self.assertTrue(targets, "README must link to project documentation")
+        for target in targets:
+            with self.subTest(target=target):
+                self.assertTrue((root / target).is_file(), f"Missing README target: {target}")
+
+    def test_readme_version_and_module_startup_options(self):
+        readme = (Path(__file__).parents[1] / "README.md").read_text(encoding="utf-8")
+        self.assertIn(f"**Version {__version__}**", readme)
+        for option, expected in (
+            ("--version", f"vdi2230 {__version__}"),
+            ("--help", "usage:"),
+        ):
+            with self.subTest(option=option):
+                self.assertIn(f"vdi2230 {option}", readme)
+                completed = subprocess.run(
+                    [sys.executable, "-m", "vdi2230", option],
+                    capture_output=True, text=True, check=False, timeout=15,
+                )
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                self.assertIn(expected, completed.stdout)
+
     def test_only_general_tk_modules_are_available(self):
         self.assertEqual(
             {module.name for module in pkgutil.iter_modules(ui.__path__)},
