@@ -10,14 +10,35 @@ from vdi2230 import __version__, ui
 
 
 class ReleaseStructureTests(unittest.TestCase):
-    def test_readme_local_links_resolve(self):
+    def test_project_documentation_local_links_resolve(self):
         root = Path(__file__).parents[1]
+        for name in ("README.md", "SOFTWARE_SPECIFICATION.md"):
+            document = (root / name).read_text(encoding="utf-8")
+            targets = re.findall(r"\]\((\./[^)]+)\)", document)
+            self.assertTrue(targets, f"{name} must link to project documentation")
+            for target in targets:
+                with self.subTest(document=name, target=target):
+                    self.assertTrue((root / target).is_file(), f"Missing target: {target}")
+
+    def test_software_specification_is_consolidated_and_english(self):
+        root = Path(__file__).parents[1]
+        specification = (root / "SOFTWARE_SPECIFICATION.md").read_text(encoding="utf-8")
+        self.assertNotRegex(specification, r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+        self.assertEqual(
+            re.findall(r"^### FR-(\d{2}):", specification, re.MULTILINE),
+            [f"{number:02}" for number in range(1, 13)],
+        )
+        self.assertIn(f"VDI 2230 Bolt Calculator {__version__}", specification)
         readme = (root / "README.md").read_text(encoding="utf-8")
-        targets = re.findall(r"\]\((\./[^)]+)\)", readme)
-        self.assertTrue(targets, "README must link to project documentation")
-        for target in targets:
-            with self.subTest(target=target):
-                self.assertTrue((root / target).is_file(), f"Missing README target: {target}")
+        self.assertIn("(./SOFTWARE_SPECIFICATION.md)", readme)
+        for name in (
+            "SOFTWARE_REQUIREMENTS_SPECIFICATION.md",
+            "SOFTWARE_ARCHITECTURE_AND_BUILD_PLAN.md",
+        ):
+            with self.subTest(legacy_document=name):
+                self.assertFalse((root / name).exists())
+                self.assertNotIn(name, readme)
+                self.assertNotIn(name, specification)
 
     def test_readme_version_and_module_startup_options(self):
         readme = (Path(__file__).parents[1] / "README.md").read_text(encoding="utf-8")

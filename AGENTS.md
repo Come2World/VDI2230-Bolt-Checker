@@ -1,4 +1,3 @@
-# 注意事项
-
-- 每次改动完成后，都必须创建一个对应的 Git commit，以便后续追踪和回滚。
-- 每次改动后，都必须编写或更新相关测试，并在交付给用户前，确保所有测试和验证全部通过。
+# Important Notes
+- After completing each change, a corresponding Git commit must be created to enable future tracking and rollback. However, my confirmation must be obtained before creating the commit.
+- After each change, the relevant tests must be written or updated. Before delivering the changes to the user, ensure that all tests and validations have passed successfully.

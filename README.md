@@ -3,6 +3,8 @@
 **Version 0.0.1** — An offline Python desktop application for checking
 concentric single-bolt joints using VDI 2230 Part 1:2015.
 
+Note: The program was developed largely by using of LLM.
+
 Enter joint geometry, materials and loads to calculate safety checks, view an
 interactive 2D section, and export a calculation report. No browser, server
 or internet connection is needed.
@@ -75,15 +77,7 @@ installation, then restart the application.
 
 ## Basic workflow
 
-1. Set the bolt, plates, loads and assembly options in the left-hand tabs.
-2. Review the section drawing and live calculation results. Clicking a part
-   focuses its input fields.
-3. Correct input errors and review all failed or flagged checks. Invalid inputs
-   disable report export and mark the previous drawing as stale.
-4. Use **Save project / Load project** for reusable JSON designs.
-   Results are recalculated when a project is loaded.
-5. Use **Export Markdown** for a calculation report. Reports cannot be loaded
-   as design projects.
+Just follow VDI 2230 PART 1.
 
 ## Scope and engineering notes
 
@@ -92,10 +86,6 @@ installation, then restart the application.
   The section view is schematic, not a manufacturing drawing or stress plot.
 - Catalog values are editable calculation references, not product certification.
   Confirm actual dimensions, material properties and availability.
-- **A2-90 is a supplier-specific reference**, not a universal ISO property class.
-  It requires an actual product shear-strength ratio. A2 bolts under alternating
-  axial load also need product-specific fatigue strength; otherwise fatigue
-  requires review.
 - A2 thread-stripping checks require actual maximum bolt tensile strength;
   nonstandard nuts also require actual nut strength data. The matching-standard-nut
   option is an assumption, not nut selection or certification.
@@ -123,6 +113,5 @@ The current validation platform is macOS; Windows still requires native testing.
 
 ## Technical documentation
 
-- [Software requirements](./SOFTWARE_REQUIREMENTS_SPECIFICATION.md)
-- [Architecture and release validation](./SOFTWARE_ARCHITECTURE_AND_BUILD_PLAN.md)
+- [Requirements, architecture and release validation](./SOFTWARE_SPECIFICATION.md)
 - [Bolt catalog, sources and licenses](./src/vdi2230/data/bolt_catalog/README.md)
