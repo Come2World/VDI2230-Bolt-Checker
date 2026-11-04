@@ -100,6 +100,14 @@ In VS Code, select the project Python environment and run the task
 **VDI 2230: Tk UI** or **VDI 2230: All tests**.
 The current validation platform is macOS; Windows still requires native testing.
 
+## License
+
+The project's original source code is licensed under the MIT License; see
+[LICENSE](./LICENSE). This license does not replace or extend the separate
+terms for third-party code, data or other materials distributed with the
+project. In particular, see the [bolt catalog sources and licenses](./src/vdi2230/data/bolt_catalog/README.md)
+and the license files distributed with that catalog.
+
 ## Technical documentation
 
 - [Requirements, architecture and release validation](./SOFTWARE_SPECIFICATION.md)
